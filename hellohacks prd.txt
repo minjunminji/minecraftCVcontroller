@@ -1,0 +1,132 @@
+﻿1. Overview
+Name TBD turns your body into a Minecraft controller using only a webcam and computer vision.
+Instead of keyboard and mouse, you walk, punch, jump, and gesture in real life to control Steve.
+The project combines MediaPipe Holistic (body + hands tracking), OpenCV (screen detection), and pyautogui/pynput (keyboard/mouse emulation).
+
+
+2. Goals
+* Create a fully playable Minecraft demo where major actions can be performed using body gestures
+* Provide an immersive experience that impresses hackathon judges
+* Focus on core controls (movement, mining, inventory interaction) rather than every single Minecraft feature
+
+
+3. Core Features
+
+
+3.1 Movement & Actions
+Gesture
+	Action in Minecraft
+	Walk in place
+	Hold W (move forward)
+	Jump IRL (or squat up-down)
+	Press Spacebar (jump)
+	Right hand mining gesture (repetitive motion)
+	Hold Left Click (mine/break block)
+	Left hand repetitive motion
+	Hold Right Click (place/use block)
+	Tilt head (yaw/pitch)
+	Move mouse left/right/up/down (camera look)
+	
+
+3.2 Inventory & Menus
+* Menu detection via screen capture
+   * Detect slot grids (gray inventory boxes)
+   * If detected, disable all normal gestures (walking, mining, jumping)
+* Hand-controlled mouse mode
+   * Raise left hand → enable cursor control
+   * Move right hand → cursor follows (smoothed)
+   * Pinch thumb + index → left click
+   * Lower left hand → press E to exit menu
+* Fallback: If no menu detected and left hand raised → press E to open inventory
+
+
+
+4. Technical Architecture
+4.1 System Flow
+   1. Frame Capture → Webcam input via OpenCV
+   2. Landmark Extraction → MediaPipe Holistic (body + hands)
+   3. Gesture Recognition → Custom modules (walking, jumping, mining, placing, headlook, inventory)
+   4. Screen Detection → OpenCV template matching to detect if a menu is open
+   5. Action Mapping → Results dictionary → keyboard/mouse emulator
+   6. Game Control → Minecraft interprets inputs
+
+4.2 Project Structure
+minecraft-body-controller/
+│
+├── main.py                # Control loop
+├── cv/
+│   ├── pose_tracking.py    # MediaPipe Holistic wrapper
+│   ├── gesture_utils.py    # Math helpers (angles, velocity, smoothing)
+├── gestures/
+│   ├── walking.py
+│   ├── jumping.py
+│   ├── mining.py
+│   ├── placing.py
+│   ├── headlook.py
+│   ├── inventory.py
+├── controls/
+│   ├── keyboard_mouse.py   # Pyautogui/pynput wrappers
+│   ├── keymap.py           # Key mappings
+├── utils/
+│   ├── smoothing.py
+│   ├── config.py           # Thresholds & constants
+├── demo/
+│   ├── overlay.py          # Debug visualization
+│   └── screenshots/        # Slot templates for menu detection
+└── requirements.txt        # Dependencies
+
+
+5. Implementation Details
+5.1 Gesture Detection
+      * Walking: Detect alternating up-down motion of knees/hips → hold W
+      * Jumping: Hip vertical velocity spike  → press Space
+      * Mining: Detect repetitive oscillating arm motion. If sustained → hold mouse button. Stop when motion stops
+      * Placing: Detect single spike in velocity of right hand (or left hand?)
+      * Or smth like flicking with your whole hand
+      * Shielding: Detect left arm mimicking holding a shield
+      * Headlook: Nose vs shoulders offset → map to relative mouse movement
+      * Head acts as a controller joystick
+      * Inventory:
+      * If menu detected: left hand up = mouse mode, pinch = click
+      * If no menu detected: left hand up = press E
+
+
+5.2 Menu Detection
+      * Slot grid detection using OpenCV template matching
+      * Flag set → disables normal gameplay gestures
+
+5.3 Controls
+         * pyautogui or pynput used for sending keypresses/mouse input
+         * State machine keeps track of which keys/mouse buttons are currently “held” to avoid spamming
+
+
+
+6. Demo Plan
+            1. Walk in place → Steve walks forward
+            2. Punch right hand repeatedly → Steve mines wood
+            3. Left hand → place block
+            4. Tilt head → look around
+            5. Right click chest → menu detected → left hand controls cursor, pinch to grab items
+            6. Lower left hand → exit back to game
+
+7. Stretch Goals (if time allows)
+               * Crouch detection → Shift
+               * Dual-hand gestures for special actions (e.g. both arms up = jump)
+               * Voice input for quick commands
+               * HUD overlay showing detected gestures
+
+
+
+
+
+
+8. Risks & Mitigations
+               * Laggy detection → mitigate with smoothing + dead zones
+               * False positives (jump vs punch) → use relative vectors + cooldowns
+               * Menu detection failure → fallback: manual left-hand up always toggles inventory
+
+
+9. Success Criteria
+               * Judges can see Steve move, mine, jump, and use menus with body gestures
+               * At least 5 gestures working reliably
+               * Demo is fun, interactive, and easy to explain
