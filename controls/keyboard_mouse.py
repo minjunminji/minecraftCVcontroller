@@ -42,6 +42,7 @@ class GameController:
             'space': Key.space,
             'shift': Key.shift,
             'ctrl': Key.ctrl,
+            'esc': Key.esc,  # Menu/back
             'e': 'e',  # Inventory
             'q': 'q',  # Drop item
             '1': '1', '2': '2', '3': '3', '4': '4', '5': '5',
