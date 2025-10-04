@@ -91,9 +91,7 @@ def main():
     # Main loop state
     debug_display = True
     calibrated = False # TODO: implement calibration
-    frame_count = 0
     fps_start_time = time.time()
-    current_fps = 0
     
     try:
         while True:
@@ -112,7 +110,8 @@ def main():
             
             # === STEP 3: Run gesture detection ===
             gesture_results = {}
-            if landmarks_dict is not None:
+            # if a person is detected
+            if landmarks_dict is not None: 
                 # Run all enabled gesture detectors
                 for name, detector in gesture_detectors.items():
                     result = detector.detect(state_manager)
@@ -148,155 +147,8 @@ def main():
             frame_display = frame.copy()
             overlay_texts = []
             
-            if debug_display:
-                if landmarks_dict is not None:
-                    frame_display = draw_landmarks(frame_display, landmarks_dict)
-                    
-                    # Get action coordinator status
-                    action_status = action_coordinator.get_status()
-                    
-                    # Prepare textual overlays
-                    left_x = 10
-                    y_pos = 30
-                    
-                    overlay_texts.append({
-                        'text': "GESTURES:",
-                        'position': (left_x, y_pos),
-                        'scale': 0.6,
-                        'color': (255, 255, 255),
-                        'thickness': 2
-                    })
-                    y_pos += 30
-                    
-                    if gesture_results:
-                        for gesture_name, gesture_data in gesture_results.items():
-                            # Skip the mapped results (left_hand, right_hand)
-                            if gesture_name in ['left_hand', 'right_hand']:
-                                continue
-                            
-                            # Extract action info
-                            if isinstance(gesture_data, dict):
-                                action = gesture_data.get('action', 'detected')
-                                action_display = action.replace('_', ' ').title()
-                                
-                                text = f"{gesture_name}: {action_display}"
-                                color = (128, 128, 255) if 'shield' in gesture_name else (255, 255, 255)
-                                overlay_texts.append({
-                                    'text': text,
-                                    'position': (left_x, y_pos),
-                                    'scale': 0.5,
-                                    'color': color,
-                                    'thickness': 1
-                                })
-                                y_pos += 25
-                    else:
-                        overlay_texts.append({
-                            'text': "None",
-                            'position': (left_x, y_pos),
-                            'scale': 0.5,
-                            'color': (150, 150, 150),
-                            'thickness': 1
-                        })
-                        y_pos += 25
-                    
-                    y_pos += 10
-                    
-                    overlay_texts.append({
-                        'text': "ACTIONS:",
-                        'position': (left_x, y_pos),
-                        'scale': 0.6,
-                        'color': (255, 255, 255),
-                        'thickness': 2
-                    })
-                    y_pos += 30
-                    
-                    # Show what's actually being pressed
-                    pressed_keys = action_status.get('pressed_keys', [])
-                    pressed_buttons = action_status.get('pressed_buttons', [])
-                    
-                    if pressed_keys:
-                        keys_text = f"Keys: {', '.join([str(k).upper() for k in pressed_keys])}"
-                        overlay_texts.append({
-                            'text': keys_text,
-                            'position': (left_x, y_pos),
-                            'scale': 0.5,
-                            'color': (0, 255, 0),
-                            'thickness': 1
-                        })
-                        y_pos += 25
-                    
-                    if pressed_buttons:
-                        buttons_text = f"Mouse: {', '.join([b.upper() for b in pressed_buttons])}"
-                        overlay_texts.append({
-                            'text': buttons_text,
-                            'position': (left_x, y_pos),
-                            'scale': 0.5,
-                            'color': (0, 255, 255),
-                            'thickness': 1
-                        })
-                        y_pos += 25
-                    
-                    if not pressed_keys and not pressed_buttons:
-                        overlay_texts.append({
-                            'text': "None",
-                            'position': (left_x, y_pos),
-                            'scale': 0.5,
-                            'color': (150, 150, 150),
-                            'thickness': 1
-                        })
-                        y_pos += 25
-                else:
-                    # No person detected
-                    overlay_texts.append({
-                        'text': "No person detected",
-                        'position': (10, 30),
-                        'scale': 0.7,
-                        'color': (0, 0, 255),
-                        'thickness': 2
-                    })
-                
-                # Calculate FPS
-                frame_count += 1
-                if frame_count >= 10:
-                    elapsed = time.time() - fps_start_time
-                    current_fps = frame_count / elapsed
-                    frame_count = 0
-                    fps_start_time = time.time()
-                
-                frame_height = frame_display.shape[0]
-                
-                overlay_texts.append({
-                    'text': f"FPS: {current_fps:.1f}",
-                    'position': (10, frame_height - 40),
-                    'scale': 0.5,
-                    'color': (255, 255, 255),
-                    'thickness': 1
-                })
-                
-                overlay_texts.append({
-                    'text': "MineMotion - Press 'q' to quit, 'd' for debug, 'r' to reset",
-                    'position': (10, frame_height - 10),
-                    'scale': 0.4,
-                    'color': (255, 255, 255),
-                    'thickness': 1
-                })
-            
-            # Mirror the frame for preview only
-            frame_display = cv2.flip(frame_display, 1)
-            
-            # Draw textual overlays on mirrored frame
-            for overlay in overlay_texts:
-                cv2.putText(
-                    frame_display,
-                    overlay['text'],
-                    overlay['position'],
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    overlay['scale'],
-                    overlay['color'],
-                    overlay['thickness']
-                )
-            
-            # Show the frame
+            # draw and show the frame
+            frame_display = draw_frame_display(action_coordinator, debug_display, fps_start_time, landmarks_dict, gesture_results, frame_display, overlay_texts)
             cv2.imshow('MineMotion - Gesture Control', frame_display)
             
             # Handle keyboard input
@@ -352,6 +204,171 @@ def main():
         print("MineMotion shutdown complete. Goodbye!")
         print("=" * 60)
 
+def draw_frame_display(action_coordinator, debug_display, fps_start_time, landmarks_dict, gesture_results, frame_display, overlay_texts):
+    """
+    Render debug visualization and overlay information on the video frame.
+
+    Args:
+        action_coordinator (ActionCoordinator): Coordinator instance to get current action status
+        debug_display (bool): Whether to show debug information and landmarks
+        fps_start_time (float): Timestamp for FPS calculation
+        landmarks_dict (dict): MediaPipe landmark data for pose visualization
+        gesture_results (dict): Results from gesture detection containing detected gestures
+        frame_display (numpy.ndarray): Current video frame to modify and return
+        overlay_texts (list): List to append text overlay configurations for drawing
+
+    Returns:
+        numpy.ndarray: Modified frame with overlays and visualizations applied
+    """
+    if debug_display:
+        if landmarks_dict is not None:
+            frame_display = draw_landmarks(frame_display, landmarks_dict)
+                    
+                    # Get action coordinator status
+            action_status = action_coordinator.get_status()
+                    
+                    # Prepare textual overlays
+            left_x = 10
+            y_pos = 30
+                    
+            overlay_texts.append({
+                        'text': "GESTURES:",
+                        'position': (left_x, y_pos),
+                        'scale': 0.6,
+                        'color': (255, 255, 255),
+                        'thickness': 2
+                    })
+            y_pos += 30
+                    
+            if gesture_results:
+                for gesture_name, gesture_data in gesture_results.items():
+                            # Skip the mapped results (left_hand, right_hand)
+                    if gesture_name in ['left_hand', 'right_hand']:
+                        continue
+                            
+                            # Extract action info
+                    if isinstance(gesture_data, dict):
+                        action = gesture_data.get('action', 'detected')
+                        action_display = action.replace('_', ' ').title()
+                                
+                        text = f"{gesture_name}: {action_display}"
+                        color = (128, 128, 255) if 'shield' in gesture_name else (255, 255, 255)
+                        overlay_texts.append({
+                                    'text': text,
+                                    'position': (left_x, y_pos),
+                                    'scale': 0.5,
+                                    'color': color,
+                                    'thickness': 1
+                                })
+                        y_pos += 25
+            else:
+                overlay_texts.append({
+                            'text': "None",
+                            'position': (left_x, y_pos),
+                            'scale': 0.5,
+                            'color': (150, 150, 150),
+                            'thickness': 1
+                        })
+                y_pos += 25
+                    
+            y_pos += 10
+                    
+            overlay_texts.append({
+                        'text': "ACTIONS:",
+                        'position': (left_x, y_pos),
+                        'scale': 0.6,
+                        'color': (255, 255, 255),
+                        'thickness': 2
+                    })
+            y_pos += 30
+                    
+                    # Show what's actually being pressed
+            pressed_keys = action_status.get('pressed_keys', [])
+            pressed_buttons = action_status.get('pressed_buttons', [])
+                    
+            if pressed_keys:
+                keys_text = f"Keys: {', '.join([str(k).upper() for k in pressed_keys])}"
+                overlay_texts.append({
+                            'text': keys_text,
+                            'position': (left_x, y_pos),
+                            'scale': 0.5,
+                            'color': (0, 255, 0),
+                            'thickness': 1
+                        })
+                y_pos += 25
+                    
+            if pressed_buttons:
+                buttons_text = f"Mouse: {', '.join([b.upper() for b in pressed_buttons])}"
+                overlay_texts.append({
+                            'text': buttons_text,
+                            'position': (left_x, y_pos),
+                            'scale': 0.5,
+                            'color': (0, 255, 255),
+                            'thickness': 1
+                        })
+                y_pos += 25
+                    
+            if not pressed_keys and not pressed_buttons:
+                overlay_texts.append({
+                            'text': "None",
+                            'position': (left_x, y_pos),
+                            'scale': 0.5,
+                            'color': (150, 150, 150),
+                            'thickness': 1
+                        })
+                y_pos += 25
+        else:
+                    # No person detected
+            overlay_texts.append({
+                        'text': "No person detected",
+                        'position': (10, 30),
+                        'scale': 0.7,
+                        'color': (0, 0, 255),
+                        'thickness': 2
+                    })
+                
+                # Calculate FPS
+        frame_count += 1
+        if frame_count >= 10:
+            elapsed = time.time() - fps_start_time
+            current_fps = frame_count / elapsed
+            frame_count = 0
+            fps_start_time = time.time()
+                
+        frame_height = frame_display.shape[0]
+                
+        overlay_texts.append({
+                    'text': f"FPS: {current_fps:.1f}",
+                    'position': (10, frame_height - 40),
+                    'scale': 0.5,
+                    'color': (255, 255, 255),
+                    'thickness': 1
+                })
+                
+        overlay_texts.append({
+                    'text': "MineMotion - Press 'q' to quit, 'd' for debug, 'r' to reset",
+                    'position': (10, frame_height - 10),
+                    'scale': 0.4,
+                    'color': (255, 255, 255),
+                    'thickness': 1
+                })
+            
+            # Mirror the frame for preview only
+    frame_display = cv2.flip(frame_display, 1)
+            
+            # Draw textual overlays on mirrored frame
+    for overlay in overlay_texts:
+        cv2.putText(
+                    frame_display,
+                    overlay['text'],
+                    overlay['position'],
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    overlay['scale'],
+                    overlay['color'],
+                    overlay['thickness']
+                )
+        
+    return frame_display
 
 if __name__ == "__main__":
     main()
