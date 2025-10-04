@@ -4,6 +4,9 @@ Action Coordinator - Coordinates gesture detection results with game controls
 
 from controls.keyboard_mouse import MinecraftController
 
+# Configuration constants
+HEAD_LOOK_SENSITIVITY = 5.0  # Adjust as needed
+HEAD_LOOK_DEADZONE = 0.01    # Minimum movement threshold
 
 class ActionCoordinator:
     """
@@ -27,8 +30,8 @@ class ActionCoordinator:
         self.is_sneaking = False
         
         # Hand action states
-        self.left_hand_action = None   # 'mining', 'shield', None
-        self.right_hand_action = None  # 'placing', 'using', None
+        self.left_hand_action = None   # 'shield', 'menu', None
+        self.right_hand_action = None  # 'mining', 'placing', 'using', 'attack', None
         
         # Mode tracking
         self.current_mode = 'gameplay'  # 'gameplay', 'menu', 'inventory'
@@ -128,56 +131,38 @@ class ActionCoordinator:
     
     def _handle_left_hand_actions(self, gesture_results):
         """
-        Handle left hand actions: mining, attacking, shield.
-        Mining: Sends L click, if multiple in period then hold L click
-        Shield: Holds R click
+        Handle left hand actions: shield, swipe in and out
         """
         left_hand = gesture_results.get('left_hand')
         
         if left_hand is None:
             # Release any active left hand actions
-            if self.left_hand_action == 'mining':
-                self.controller.stop_mining()
-            elif self.left_hand_action == 'shield':
+            if self.left_hand_action == 'shield':
                 self.controller.stop_using_item()
             self.left_hand_action = None
             return
         
         action_type = left_hand.get('action')
         
-        # Mining gesture
-        if action_type == 'mining_click':
-            # Single click
-            self.controller.attack()
-            self.left_hand_action = 'attack'
-            
-        elif action_type == 'mining_start_hold':
-            # Start holding for continuous mining
-            if self.left_hand_action != 'mining':
-                self.controller.start_mining()
-                self.left_hand_action = 'mining'
-                
-        elif action_type == 'mining_stop_hold':
-            # Stop mining
-            if self.left_hand_action == 'mining':
-                self.controller.stop_mining()
-                self.left_hand_action = None
+        # Menu navigation gestures
+        if action_type == 'menu_swipe_right':
+            if self.current_mode != 'menu':
+                self._enter_menu_mode(open_inventory=True)
+            return
+        
+        if action_type == 'menu_swipe_left':
+            self._exit_menu_mode()
+            return
         
         # Shield gesture
-        elif action_type == 'shield_start':
+        if action_type == 'shield_start':
             if self.left_hand_action != 'shield':
-                # Release any mining action first
-                if self.left_hand_action == 'mining':
-                    self.controller.stop_mining()
                 self.controller.start_using_item()
                 self.left_hand_action = 'shield'
         
         elif action_type == 'shield_hold':
             # Continue holding shield (maintain current state)
             if self.left_hand_action != 'shield':
-                # Ensure shield is active
-                if self.left_hand_action == 'mining':
-                    self.controller.stop_mining()
                 self.controller.start_using_item()
                 self.left_hand_action = 'shield'
                 
@@ -188,19 +173,44 @@ class ActionCoordinator:
     
     def _handle_right_hand_actions(self, gesture_results):
         """
-        Handle right hand actions: placing blocks, using items.
-        Placing gesture: Sends R click
+        Handle right hand actions: mining, attacking, placing
         """
         right_hand = gesture_results.get('right_hand')
         
         if right_hand is None:
+            if self.right_hand_action == 'mining':
+                self.controller.stop_mining()
+            elif self.right_hand_action == 'using':
+                self.controller.stop_using_item()
             self.right_hand_action = None
             return
         
         action_type = right_hand.get('action')
         
+        # Mining gestures
+        if action_type == 'mining_click':
+            self.controller.attack()
+            self.right_hand_action = 'attack'
+        
+        elif action_type == 'mining_start_hold':
+            if self.right_hand_action != 'mining':
+                self.controller.start_mining()
+            self.right_hand_action = 'mining'
+        
+        elif action_type == 'mining_continue_hold':
+            if self.right_hand_action != 'mining':
+                self.controller.start_mining()
+            self.right_hand_action = 'mining'
+        
+        elif action_type == 'mining_stop_hold':
+            if self.right_hand_action == 'mining':
+                self.controller.stop_mining()
+            self.right_hand_action = None
+        
         # Placing gesture
-        if action_type == 'place':
+        elif action_type == 'place':
+            if self.right_hand_action == 'mining':
+                self.controller.stop_mining()
             self.controller.use_item()
             self.right_hand_action = 'placing'
         
@@ -219,11 +229,10 @@ class ActionCoordinator:
             dy = head_look.get('dy', 0)
             
             # Apply sensitivity scaling
-            sensitivity = 5.0  # Adjust as needed
-            if abs(dx) > 0.01 or abs(dy) > 0.01:  # Dead zone
+            if abs(dx) > HEAD_LOOK_DEADZONE or abs(dy) > HEAD_LOOK_DEADZONE:
                 self.controller.move_mouse(
-                    int(dx * sensitivity),
-                    int(dy * sensitivity)
+                    int(dx * HEAD_LOOK_SENSITIVITY),
+                    int(dy * HEAD_LOOK_SENSITIVITY)
                 )
     
     def _handle_mode_switches(self, gesture_results):
@@ -231,41 +240,70 @@ class ActionCoordinator:
         mode_switch = gesture_results.get('mode_switch')
         
         if mode_switch == 'enter_menu':
-            self._enter_menu_mode()
+            self._enter_menu_mode(open_inventory=True)
+        elif mode_switch == 'cursor_released':
+            self._enter_menu_mode(open_inventory=False)
+        elif mode_switch == 'cursor_locked':
+            self._exit_menu_mode()
         elif mode_switch == 'exit_menu':
             self._exit_menu_mode()
     
     def _execute_menu_actions(self, gesture_results, state_manager):
         """Execute actions during menu mode."""
+        _ = state_manager  # Placeholder for future expansions
+        
+        # Allow mode switches (e.g., cursor lock/unlock) to modify state while in menu
+        self._handle_mode_switches(gesture_results)
+        if self.current_mode != 'menu':
+            return
+        
+        left_hand = gesture_results.get('left_hand')
+        if left_hand:
+            menu_hand_action = left_hand.get('action')
+            if menu_hand_action == 'menu_swipe_left':
+                self._exit_menu_mode()
+                return
+            elif menu_hand_action == 'menu_swipe_right':
+                # Maintain menu state without re-sending inventory toggle
+                self._enter_menu_mode(open_inventory=False)
+        
         menu_action = gesture_results.get('menu_action')
         
         if menu_action == 'select':
             self.controller.click_mouse('left')
         elif menu_action == 'back':
-            self.controller.tap_key('e')  # Exit inventory
+            self._exit_menu_mode()
     
-    def _enter_menu_mode(self):
+    def _enter_menu_mode(self, open_inventory=True):
         """Switch to menu mode."""
-        if self.current_mode != 'menu':
-            # Release all gameplay inputs
-            self.controller.stop_moving()
-            self.controller.stop_mining()
-            self.controller.stop_using_item()
-            
-            # Open inventory
+        if self.current_mode == 'menu':
+            return
+        
+        # Release all gameplay-related inputs
+        self.controller.stop_moving()
+        self.controller.stop_mining()
+        self.controller.stop_using_item()
+        
+        if open_inventory:
             self.controller.open_inventory()
-            
-            self.current_mode = 'menu'
+        
+        self.current_mode = 'menu'
+        self.active_movement = None
+        self.left_hand_action = None
+        self.right_hand_action = None
+    
+    def _exit_menu_mode(self):
+        """Send ESC to exit menus and return to gameplay mode."""
+        was_in_menu = self.current_mode == 'menu'
+        
+        # Always send ESC to close any open UI
+        self.controller.tap_key('esc')
+        
+        if was_in_menu:
+            self.current_mode = 'gameplay'
             self.active_movement = None
             self.left_hand_action = None
             self.right_hand_action = None
-    
-    def _exit_menu_mode(self):
-        """Switch back to gameplay mode."""
-        if self.current_mode == 'menu':
-            # Close inventory if open
-            self.controller.tap_key('e')
-            self.current_mode = 'gameplay'
     
     def reset(self):
         """Reset all actions and release all inputs."""
@@ -277,10 +315,6 @@ class ActionCoordinator:
         self.left_hand_action = None
         self.right_hand_action = None
         self.current_mode = 'gameplay'
-    
-    def cleanup(self):
-        """Clean up resources and release all inputs."""
-        self.reset()
     
     def get_status(self):
         """Get current action status (for debugging/display)."""
