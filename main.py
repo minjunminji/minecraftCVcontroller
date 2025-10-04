@@ -336,7 +336,7 @@ def main():
         print("\nCleaning up...")
         
         # Release all game controls
-        action_coordinator.cleanup()
+        action_coordinator.reset()
         print("✓ Released all game controls")
         
         # Release webcam
