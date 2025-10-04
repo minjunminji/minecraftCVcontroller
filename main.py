@@ -16,7 +16,7 @@ from controls.keyboard_mouse import MinecraftController
 from gestures.shield import ShieldDetector
 from gestures.mining import MiningDetector
 from gestures.placing import PlacingDetector
-from gestures.walking_sprinting import MovementDetector
+from gestures.movement import MovementDetector
 
 
 def main():
