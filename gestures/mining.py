@@ -21,9 +21,9 @@ class MiningDetector(BaseGestureDetector):
         super().__init__("mining")
         
         # Configuration
-        self.velocity_threshold = 0.5  # Minimum velocity to trigger attack
+        self.velocity_threshold = 1  # Minimum velocity to trigger attack
         self.click_interval = 0.5      # Max time between clicks to count as mining
-        self.oscillation_threshold = 0.1  # Threshold for oscillation detection
+        self.oscillation_threshold = 1  # Threshold for oscillation detection
         self.min_clicks_for_hold = 2   # Number of clicks before holding
         
         # State tracking

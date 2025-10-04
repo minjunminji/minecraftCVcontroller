@@ -30,13 +30,6 @@ Each file in this directory, like [`shield.py`](minecraftCVcontroller/gestures/s
 *   It uses the [`GestureStateManager`](minecraftCVcontroller/utils/state_manager.py:10) to access current and past landmark positions to determine if its specific gesture is being performed.
 *   It returns a dictionary describing the action (e.g., `{'action': 'shield_start'}`) or `None` if the gesture is not detected.
 
-| Detector | File | Status | Output Schema | Notes |
-| --- | --- | --- | --- | --- |
-| ShieldDetector | [`gestures/shield.py`](minecraftCVcontroller/gestures/shield.py:9) | **Implemented** | `{'action': 'shield_start'|'shield_hold'|'shield_stop', ...debug fields}` | Uses left shoulder/elbow/wrist landmarks to detect raised forearm for blocking |
-| MiningDetector | [`gestures/mining.py`](minecraftCVcontroller/gestures/mining.py:9) | **Implemented** | `{'action': 'mining_click'|'mining_start_hold'|'mining_continue_hold'|'mining_stop_hold'}` | Uses right wrist speed + oscillation to toggle between clicks and continuous mining |
-| PlacingDetector | [`gestures/placing.py`](minecraftCVcontroller/gestures/placing.py:8) | Stub | Intended: `{'action': 'place'|'scroll_up'|'scroll_down'}` | Placeholder for right-hand placing / hotbar gestures |
-| MovementDetector | [`gestures/walking_sprinting.py`](minecraftCVcontroller/gestures/walking_sprinting.py:8) | Stub | Intended: `{'action': 'move', 'is_walking': bool, 'left_thumb_back': bool, 'torso_lean': ...}` | Future work to read leg motion, thumb position (hand landmarks), torso lean |
-
 #### Shield Gesture Logic
 
 1. Pulls left shoulder/elbow/wrist positions
@@ -51,11 +44,18 @@ Each file in this directory, like [`shield.py`](minecraftCVcontroller/gestures/s
 
 #### Mining Gesture Logic
 
-1. Fetches right wrist speed over a small window
-2. Detects spikes above `velocity_threshold` (0.5) to trigger clicks
-3. If multiple spikes within `click_interval` (0.5 s) occur, transitions into hold mode
-4. While holding, checks oscillation of right wrist to maintain hold; stops when motion ceases
-5. Handles state resets when tracking data disappears
+1. Monitors right wrist velocity using a 3-frame window for responsive detection
+2. Detects velocity spikes above `velocity_threshold` (1.0) to trigger individual attack clicks
+3. Tracks click frequency within `click_interval` (0.5s) and counts consecutive clicks
+4. Transitions to continuous mining mode after `min_clicks_for_hold` (2) rapid clicks
+5. While in hold mode, monitors wrist oscillation patterns to maintain continuous mining
+6. Stops hold mode when oscillation ceases or tracking is lost
+7. Includes timeout logic to reset click sequences after `click_interval * 2` (1.0s) of inactivity
+8. Emits:
+   - `mining_click` for individual attack motions
+   - `mining_start_hold` when transitioning to continuous mining
+   - `mining_continue_hold` while maintaining continuous mining
+   - `mining_stop_hold` when stopping continuous mining or losing tracking
 
 ### Action Coordinator (`utils/action_coordinator.py`)
 
