@@ -11,6 +11,8 @@ import numpy as np
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
+mp_pose = mp.solutions.pose
+mp_hands = mp.solutions.hands
 
 # Global holistic instance
 holistic = mp_holistic.Holistic(
@@ -56,24 +58,55 @@ def get_landmarks(frame):
     
     # Extract pose landmarks (33 landmarks)
     if results.pose_landmarks:
-        landmarks_dict['pose'] = [
-            {'x': lm.x, 'y': lm.y, 'z': lm.z, 'visibility': lm.visibility}
-            for lm in results.pose_landmarks.landmark
-        ]
+        pose_landmarks = []
+        for idx, lm in enumerate(results.pose_landmarks.landmark):
+            try:
+                landmark_enum = mp_pose.PoseLandmark(idx)
+                name = landmark_enum.name.lower()
+            except ValueError:
+                name = f"pose_{idx}"
+            pose_landmarks.append({
+                'name': name,
+                'x': lm.x,
+                'y': lm.y,
+                'z': lm.z,
+                'visibility': lm.visibility
+            })
+        landmarks_dict['pose'] = pose_landmarks
     
     # Extract left hand landmarks (21 landmarks)
     if results.left_hand_landmarks:
-        landmarks_dict['left_hand'] = [
-            {'x': lm.x, 'y': lm.y, 'z': lm.z}
-            for lm in results.left_hand_landmarks.landmark
-        ]
+        left_hand_landmarks = []
+        for idx, lm in enumerate(results.left_hand_landmarks.landmark):
+            try:
+                landmark_enum = mp_hands.HandLandmark(idx)
+                name = landmark_enum.name.lower()
+            except ValueError:
+                name = f"hand_{idx}"
+            left_hand_landmarks.append({
+                'name': f"left_{name}",
+                'x': lm.x,
+                'y': lm.y,
+                'z': lm.z
+            })
+        landmarks_dict['left_hand'] = left_hand_landmarks
     
     # Extract right hand landmarks (21 landmarks)
     if results.right_hand_landmarks:
-        landmarks_dict['right_hand'] = [
-            {'x': lm.x, 'y': lm.y, 'z': lm.z}
-            for lm in results.right_hand_landmarks.landmark
-        ]
+        right_hand_landmarks = []
+        for idx, lm in enumerate(results.right_hand_landmarks.landmark):
+            try:
+                landmark_enum = mp_hands.HandLandmark(idx)
+                name = landmark_enum.name.lower()
+            except ValueError:
+                name = f"hand_{idx}"
+            right_hand_landmarks.append({
+                'name': f"right_{name}",
+                'x': lm.x,
+                'y': lm.y,
+                'z': lm.z
+            })
+        landmarks_dict['right_hand'] = right_hand_landmarks
     
     # Extract face landmarks (468 landmarks)
     if results.face_landmarks:

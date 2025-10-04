@@ -1,19 +1,46 @@
 """
-Main control loop for webcam input and landmark detection
+Main control loop for webcam input and landmark detection with gesture recognition
 """
 
 import cv2
 import sys
+import time
 from cv.pose_tracking import get_landmarks, draw_landmarks, cleanup
+
+# Import the new architecture components
+from utils.state_manager import GestureStateManager
+from utils.action_coordinator import ActionCoordinator
+from controls.keyboard_mouse import MinecraftController
+
+# Import gesture detectors
+from gestures.shield import ShieldDetector
+from gestures.mining import MiningDetector
+from gestures.placing import PlacingDetector
+from gestures.walking_sprinting import MovementDetector
 
 
 def main():
     """
-    Main loop: capture webcam frames, extract landmarks, and display results.
-    Press 'q' to quit
+    Main gameplay loop with gesture detection and action coordination.
+    
+    Architecture:
+    1. Capture webcam frame
+    2. Extract MediaPipe landmarks
+    3. Update state manager with landmark history
+    4. Run all gesture detectors
+    5. Coordinate and execute game actions
+    6. Display debug visualization
     """
-    # Open webcam (0 = default camera)
-    cap = cv2.VideoCapture(0)
+    
+    print("=" * 60)
+    print("MineMotion - Gesture-Controlled Minecraft")
+    print("=" * 60)
+    print("\nInitializing components...")
+    
+    # Initialize webcam
+    # webcam 0 = iphone continuity camera
+    # webcam 1 = mac camera
+    cap = cv2.VideoCapture(1)
     
     if not cap.isOpened():
         print("Error: Could not open webcam.")
@@ -23,8 +50,50 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     
-    print("Webcam started")
-    print("Press 'q' to quit")
+    # Initialize state manager for temporal tracking
+    state_manager = GestureStateManager(history_size=30, fps=30)
+    print("✓ State Manager initialized")
+    
+    # Initialize game controller
+    try:
+        game_controller = MinecraftController()
+        print("✓ Game Controller initialized")
+    except ImportError as e:
+        print(f"✗ Error initializing controller: {e}")
+        print("  Please install required packages: pip install pynput")
+        cap.release()
+        sys.exit(1)
+    
+    # Initialize action coordinator
+    action_coordinator = ActionCoordinator(game_controller)
+    print("✓ Action Coordinator initialized")
+    
+    # Initialize gesture detectors
+    gesture_detectors = {
+        'shield': ShieldDetector(),      # Left hand: shield block
+        'mining': MiningDetector(),      # FIXME: Right hand: mining / attacking
+        'placing': PlacingDetector(),    # TODO: Right hand: placing / using items
+        'movement': MovementDetector(),  # TODO: Locomotion
+    }
+    enabled_count = sum(1 for detector in gesture_detectors.values() if detector.is_enabled())
+    print(f"✓ {enabled_count} gesture detector(s) enabled / {len(gesture_detectors)} total initialized")
+    
+    print("\n" + "=" * 60)
+    print("System ready! Starting main loop...")
+    print("=" * 60)
+    print("\nControls:")
+    print("  'q' - Quit application")
+    print("  'r' - Reset all actions")
+    print("  'd' - Toggle debug display")
+    print("  'c' - Calibrate neutral pose")
+    print("\nWaiting for person detection...")
+    
+    # Main loop state
+    debug_display = True
+    calibrated = False # TODO: implement calibration
+    frame_count = 0
+    fps_start_time = time.time()
+    current_fps = 0
     
     try:
         while True:
@@ -35,77 +104,254 @@ def main():
                 print("Error: Failed to capture frame.")
                 break
             
-            # Flip frame horizontally for mirror effect
-            frame = cv2.flip(frame, 1)
-            
-            # Get landmarks from the frame
+            # === STEP 1: Get landmarks from MediaPipe ===
             landmarks_dict = get_landmarks(frame)
             
-            # Draw landmarks on the frame for debugging
-            if landmarks_dict is not None:
-                frame = draw_landmarks(frame, landmarks_dict)
-                
-                # Display landmark detection status
-                status_text = "Tracking: "
-                if landmarks_dict['pose']:
-                    status_text += "Body "
-                if landmarks_dict['left_hand']:
-                    status_text += "L-Hand "
-                if landmarks_dict['right_hand']:
-                    status_text += "R-Hand "
-                
-                cv2.putText(
-                    frame,
-                    status_text,
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (0, 255, 0),
-                    2
-                )
-            else:
-                # No person detected
-                cv2.putText(
-                    frame,
-                    "No person detected",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (0, 0, 255),
-                    2
-                )
+            # === STEP 2: Update state manager with new landmark data ===
+            state_manager.update(landmarks_dict)
             
-            # Display FPS
-            # Note: for accurate FPS we'd need to track time between frames
-            cv2.putText(
-                frame,
-                "MineMotion - Press 'q' to quit",
-                (10, frame.shape[0] - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 255),
-                1
-            )
+            # === STEP 3: Run gesture detection ===
+            gesture_results = {}
+            if landmarks_dict is not None:
+                # Run all enabled gesture detectors
+                for name, detector in gesture_detectors.items():
+                    result = detector.detect(state_manager)
+                    if result is not None:
+                        gesture_results[name] = result
+                
+                # Map left hand gestures (priority order)
+                left_hand_priority = ['shield']
+                for gesture_name in left_hand_priority:
+                    if gesture_name in gesture_results:
+                        gesture_payload = gesture_results[gesture_name]
+                        if isinstance(gesture_payload, dict):
+                            gesture_results['left_hand'] = {**gesture_payload, 'source': gesture_name}
+                        else:
+                            gesture_results['left_hand'] = {'action': gesture_payload, 'source': gesture_name}
+                        break
+                
+                # Map right hand gestures (priority order)
+                right_hand_priority = ['mining', 'placing']
+                for gesture_name in right_hand_priority:
+                    if gesture_name in gesture_results:
+                        gesture_payload = gesture_results[gesture_name]
+                        if isinstance(gesture_payload, dict):
+                            gesture_results['right_hand'] = {**gesture_payload, 'source': gesture_name}
+                        else:
+                            gesture_results['right_hand'] = {'action': gesture_payload, 'source': gesture_name}
+                        break
+                
+                # === STEP 4: Execute actions via coordinator ===
+                action_coordinator.execute(gesture_results, state_manager)
+            
+            # === STEP 5: Prepare frame for display ===
+            frame_display = frame.copy()
+            overlay_texts = []
+            
+            if debug_display:
+                if landmarks_dict is not None:
+                    frame_display = draw_landmarks(frame_display, landmarks_dict)
+                    
+                    # Get action coordinator status
+                    action_status = action_coordinator.get_status()
+                    
+                    # Prepare textual overlays
+                    left_x = 10
+                    y_pos = 30
+                    
+                    overlay_texts.append({
+                        'text': "GESTURES:",
+                        'position': (left_x, y_pos),
+                        'scale': 0.6,
+                        'color': (255, 255, 255),
+                        'thickness': 2
+                    })
+                    y_pos += 30
+                    
+                    if gesture_results:
+                        for gesture_name, gesture_data in gesture_results.items():
+                            # Skip the mapped results (left_hand, right_hand)
+                            if gesture_name in ['left_hand', 'right_hand']:
+                                continue
+                            
+                            # Extract action info
+                            if isinstance(gesture_data, dict):
+                                action = gesture_data.get('action', 'detected')
+                                action_display = action.replace('_', ' ').title()
+                                
+                                text = f"{gesture_name}: {action_display}"
+                                color = (128, 128, 255) if 'shield' in gesture_name else (255, 255, 255)
+                                overlay_texts.append({
+                                    'text': text,
+                                    'position': (left_x, y_pos),
+                                    'scale': 0.5,
+                                    'color': color,
+                                    'thickness': 1
+                                })
+                                y_pos += 25
+                    else:
+                        overlay_texts.append({
+                            'text': "None",
+                            'position': (left_x, y_pos),
+                            'scale': 0.5,
+                            'color': (150, 150, 150),
+                            'thickness': 1
+                        })
+                        y_pos += 25
+                    
+                    y_pos += 10
+                    
+                    overlay_texts.append({
+                        'text': "ACTIONS:",
+                        'position': (left_x, y_pos),
+                        'scale': 0.6,
+                        'color': (255, 255, 255),
+                        'thickness': 2
+                    })
+                    y_pos += 30
+                    
+                    # Show what's actually being pressed
+                    pressed_keys = action_status.get('pressed_keys', [])
+                    pressed_buttons = action_status.get('pressed_buttons', [])
+                    
+                    if pressed_keys:
+                        keys_text = f"Keys: {', '.join([str(k).upper() for k in pressed_keys])}"
+                        overlay_texts.append({
+                            'text': keys_text,
+                            'position': (left_x, y_pos),
+                            'scale': 0.5,
+                            'color': (0, 255, 0),
+                            'thickness': 1
+                        })
+                        y_pos += 25
+                    
+                    if pressed_buttons:
+                        buttons_text = f"Mouse: {', '.join([b.upper() for b in pressed_buttons])}"
+                        overlay_texts.append({
+                            'text': buttons_text,
+                            'position': (left_x, y_pos),
+                            'scale': 0.5,
+                            'color': (0, 255, 255),
+                            'thickness': 1
+                        })
+                        y_pos += 25
+                    
+                    if not pressed_keys and not pressed_buttons:
+                        overlay_texts.append({
+                            'text': "None",
+                            'position': (left_x, y_pos),
+                            'scale': 0.5,
+                            'color': (150, 150, 150),
+                            'thickness': 1
+                        })
+                        y_pos += 25
+                else:
+                    # No person detected
+                    overlay_texts.append({
+                        'text': "No person detected",
+                        'position': (10, 30),
+                        'scale': 0.7,
+                        'color': (0, 0, 255),
+                        'thickness': 2
+                    })
+                
+                # Calculate FPS
+                frame_count += 1
+                if frame_count >= 10:
+                    elapsed = time.time() - fps_start_time
+                    current_fps = frame_count / elapsed
+                    frame_count = 0
+                    fps_start_time = time.time()
+                
+                frame_height = frame_display.shape[0]
+                
+                overlay_texts.append({
+                    'text': f"FPS: {current_fps:.1f}",
+                    'position': (10, frame_height - 40),
+                    'scale': 0.5,
+                    'color': (255, 255, 255),
+                    'thickness': 1
+                })
+                
+                overlay_texts.append({
+                    'text': "MineMotion - Press 'q' to quit, 'd' for debug, 'r' to reset",
+                    'position': (10, frame_height - 10),
+                    'scale': 0.4,
+                    'color': (255, 255, 255),
+                    'thickness': 1
+                })
+            
+            # Mirror the frame for preview only
+            frame_display = cv2.flip(frame_display, 1)
+            
+            # Draw textual overlays on mirrored frame
+            for overlay in overlay_texts:
+                cv2.putText(
+                    frame_display,
+                    overlay['text'],
+                    overlay['position'],
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    overlay['scale'],
+                    overlay['color'],
+                    overlay['thickness']
+                )
             
             # Show the frame
-            cv2.imshow('MineMotion - Landmark Detection', frame)
+            cv2.imshow('MineMotion - Gesture Control', frame_display)
             
-            # Check for q key to quit
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                print("Quitting...")
+            # Handle keyboard input
+            key = cv2.waitKey(1) & 0xFF
+            
+            if key == ord('q'):
+                print("\nQuitting...")
                 break
+            elif key == ord('r'):
+                print("\nResetting all actions...")
+                action_coordinator.reset()
+                for detector in gesture_detectors.values():
+                    detector.reset()
+                state_manager.clear_history()
+                calibrated = False
+            elif key == ord('d'):
+                debug_display = not debug_display
+                print(f"\nDebug display: {'ON' if debug_display else 'OFF'}")
+            elif key == ord('c'):
+                if landmarks_dict is not None:
+                    state_manager.set_calibration_baseline(landmarks_dict)
+                    calibrated = True
+                    print("\n✓ Calibration complete! Neutral pose captured.")
+                else:
+                    print("\n✗ Cannot calibrate - no person detected")
     
     except KeyboardInterrupt:
-        print("\nInterrupted by user")
+        print("\n\nInterrupted by user")
+    
+    except Exception as e:
+        print(f"\n\nError in main loop: {e}")
+        import traceback
+        traceback.print_exc()
     
     finally:
-        # Clean up resources
+        # === Cleanup ===
+        print("\nCleaning up...")
+        
+        # Release all game controls
+        action_coordinator.cleanup()
+        print("✓ Released all game controls")
+        
+        # Release webcam
         cap.release()
         cv2.destroyAllWindows()
+        print("✓ Released webcam")
+        
+        # Cleanup MediaPipe
         cleanup()
-        print("Cleaned up resources. Goodbye!")
+        print("✓ MediaPipe cleanup complete")
+        
+        print("\n" + "=" * 60)
+        print("MineMotion shutdown complete. Goodbye!")
+        print("=" * 60)
 
 
 if __name__ == "__main__":
     main()
-
