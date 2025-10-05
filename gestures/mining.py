@@ -31,6 +31,8 @@ class MiningDetector(BaseGestureDetector):
         self.sequence_reset_timeout = 1.5            # Timeout for streak tracking
         self.single_click_cooldown = 0.25            # Minimum time between single clicks
         self.hold_grace_period = 0.35                # Grace period to maintain hold without spikes
+        self.open_hand_area_threshold = 0.55         # Above this normalized area, treat hand as open (placing)
+        self.closed_hand_area_threshold = 0.45       # Below this normalized area, treat hand as closed (mining)
         
         # State tracking
         self._state = {
@@ -67,6 +69,12 @@ class MiningDetector(BaseGestureDetector):
         if velocity_vector is None:
             return self._handle_tracking_lost()
         
+        hand_spread = self._get_hand_spread_area(state_manager)
+        hand_is_open = False
+        hand_is_closed = False
+        if hand_spread is not None:
+            hand_is_open = hand_spread >= self.open_hand_area_threshold
+            hand_is_closed = hand_spread <= self.closed_hand_area_threshold
         velocity = float(np.linalg.norm(velocity_vector))
         self._state['last_velocity'] = velocity
         current_time = time.time()
@@ -79,6 +87,20 @@ class MiningDetector(BaseGestureDetector):
             direction = -1
         
         velocity_spike = velocity > self.velocity_threshold and direction != 0
+        
+        if self._state['is_holding'] and hand_is_open:
+            self._state['is_holding'] = False
+            self._reset_direction_tracking()
+            self._state['click_count'] = 0
+            self._state['last_click_time'] = None
+            self._state['last_spike_time'] = None
+            return {'action': 'mining_stop_hold'}
+        
+        if velocity_spike and (hand_is_open or not hand_is_closed):
+            self._reset_direction_tracking()
+            self._state['last_spike_time'] = current_time
+            self._state['last_velocity'] = velocity
+            return None
         
         if velocity_spike:
             last_spike_time = self._state['last_spike_time']
@@ -168,6 +190,67 @@ class MiningDetector(BaseGestureDetector):
             self._reset_direction_tracking()
         
         return None
+    
+    def _get_hand_spread_area(self, state_manager):
+        """
+        Estimate normalized fingertip spread area for right hand.
+
+        Returns:
+            float or None: Normalized area (size-invariant), None if landmarks missing.
+        """
+        fingertip_names = [
+            'right_thumb_tip',
+            'right_index_finger_tip',
+            'right_middle_finger_tip',
+            'right_ring_finger_tip',
+            'right_pinky_tip',
+        ]
+        
+        points = []
+        for name in fingertip_names:
+            pos = state_manager.get_landmark_position(name)
+            if pos is None:
+                return None
+            points.append((float(pos[0]), float(pos[1])))
+        
+        raw_area = self._polygon_area(points)
+        hand_scale = self._get_hand_scale(state_manager)
+        if hand_scale is None:
+            return None
+        
+        return float(raw_area / max(hand_scale ** 2, 1e-6))
+    
+    @staticmethod
+    def _polygon_area(points):
+        """Compute area via shoelace formula."""
+        area = 0.0
+        count = len(points)
+        for i in range(count):
+            x1, y1 = points[i]
+            x2, y2 = points[(i + 1) % count]
+            area += x1 * y2 - x2 * y1
+        return abs(area) * 0.5
+    
+    def _get_hand_scale(self, state_manager):
+        """Estimate characteristic hand size for normalization."""
+        distance_pairs = [
+            ('right_wrist', 'right_index_finger_mcp'),
+            ('right_wrist', 'right_middle_finger_mcp'),
+            ('right_wrist', 'right_ring_finger_mcp'),
+            ('right_wrist', 'right_pinky_mcp'),
+            ('right_index_finger_mcp', 'right_pinky_mcp'),
+        ]
+        
+        distances = []
+        for start, end in distance_pairs:
+            dist = state_manager.get_landmark_distance(start, end)
+            if dist is not None and dist > 1e-5:
+                distances.append(dist)
+        
+        if not distances:
+            return None
+        
+        return float(np.median(distances))
     
     def _compute_directional_velocity(self, state_manager, velocity_vector):
         """Project wrist velocity onto the forearm axis to obtain signed magnitude."""
