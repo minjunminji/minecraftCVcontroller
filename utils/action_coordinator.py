@@ -193,8 +193,13 @@ class ActionCoordinator:
         
         action_type = right_hand.get('action')
         
+        # Attack gesture (single left click)
+        if action_type == 'attack_click':
+            self.controller.single_left_click()
+            self.right_hand_action = 'attack'
+        
         # Mining gestures
-        if action_type == 'mining_click':
+        elif action_type == 'mining_click':
             self.controller.single_left_click()
             self.right_hand_action = 'attack'
         

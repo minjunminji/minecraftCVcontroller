@@ -19,6 +19,7 @@ from gestures.placing import PlacingDetector
 from gestures.movement import MovementDetector
 from gestures.inventory import InventoryDetector
 from gestures.cursor_control import CursorControlDetector
+from gestures.attack import AttackDetector
 
 
 def main():
@@ -75,9 +76,10 @@ def main():
         'shield': ShieldDetector(),         # Left hand: shield block
         'inventory': InventoryDetector(),   # Left hand: inventory open
         'cursor_control': CursorControlDetector(),  # Right hand: menu cursor control
-        'mining': MiningDetector(),         # FIXME: Right hand: mining / attacking
-        'placing': PlacingDetector(),       # TODO: Right hand: placing / using items
-        'movement': MovementDetector(),     # TODO: Locomotion
+        'attack': AttackDetector(),         # Right hand: single left clicks (attacking)
+        'mining': MiningDetector(),         # Right hand: mining / continuous attacking
+        'placing': PlacingDetector(),       # Right hand: placing / using items
+        'movement': MovementDetector(),     # Locomotion
     }
     enabled_count = sum(1 for detector in gesture_detectors.values() if detector.is_enabled())
     print(f"✓ {enabled_count} gesture detector(s) enabled / {len(gesture_detectors)} total initialized")
@@ -143,7 +145,7 @@ def main():
                         break
                 
                 # Map right hand gestures (priority order)
-                right_hand_priority = ['placing', 'mining']
+                right_hand_priority = ['placing', 'attack', 'mining']
                 for gesture_name in right_hand_priority:
                     if gesture_name in gesture_results:
                         gesture_payload = gesture_results[gesture_name]
