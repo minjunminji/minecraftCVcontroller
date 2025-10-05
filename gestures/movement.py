@@ -21,12 +21,12 @@ from gestures.base_detector import BaseGestureDetector
 
 
 # Detection thresholds (tuned for stability over speed)
-WALK_ENTER_THRESHOLD = 0.15   # Enter WALKING state
+WALK_ENTER_THRESHOLD = 0.20   # Enter WALKING state
 WALK_EXIT_THRESHOLD = 0.08    # Exit to IDLE (hysteresis gap)
 VISIBILITY_THRESHOLD = 0.6     # MediaPipe visibility confidence minimum
 MIN_STABLE_FRAMES = 2          # Frames required for stable state transition
-LEAN_THRESHOLD = 0.01          # Normalized X-displacement for torso lean (configurable)
-LEAN_DEADZONE = 0.005           # Minimum displacement to ignore (noise/small movements)
+LEAN_THRESHOLD = 0.007         # Normalized X-displacement for torso lean (shoulder-to-hip method)
+LEAN_DEADZONE = 0.003          # Minimum displacement to ignore (noise/small movements)
 LEAN_COOLDOWN_FRAMES = 10      # Frames to wait after lean ends before allowing walking (0.5s at 30fps)
 
 
@@ -383,9 +383,11 @@ class MovementDetector(BaseGestureDetector):
     
     def _detect_torso_lean_simple(self, state_manager):
         """
-        Simple torso lean detection using X-coordinate displacement.
+        Simple torso lean detection using shoulder-to-hip X-coordinate displacement.
         
-        Measures horizontal displacement between nose and shoulder midpoint.
+        Measures horizontal displacement between shoulder midpoint and hip midpoint.
+        This measures actual torso posture and is independent of head movement,
+        preventing interference with camera panning (which uses face/eye landmarks).
         This approach is more robust to camera angles than 3D vector methods.
         
         Args:
@@ -396,22 +398,26 @@ class MovementDetector(BaseGestureDetector):
         """
         left_shoulder = state_manager.get_landmark_position('left_shoulder')
         right_shoulder = state_manager.get_landmark_position('right_shoulder')
-        nose = state_manager.get_landmark_position('nose')
+        left_hip = state_manager.get_landmark_position('left_hip')
+        right_hip = state_manager.get_landmark_position('right_hip')
         
-        if left_shoulder is None or right_shoulder is None or nose is None:
+        if left_shoulder is None or right_shoulder is None or left_hip is None or right_hip is None:
             return None
         
         # Check visibility of required landmarks
-        if not self._check_visibility(state_manager, 
-                                      ['left_shoulder', 'right_shoulder', 'nose']):
+        if not self._check_visibility(state_manager,
+                                      ['left_shoulder', 'right_shoulder', 'left_hip', 'right_hip']):
             return None
         
         # Calculate shoulder midpoint X-coordinate
         shoulder_mid_x = (left_shoulder[0] + right_shoulder[0]) / 2.0
-        nose_x = nose[0]
+        
+        # Calculate hip midpoint X-coordinate
+        hip_mid_x = (left_hip[0] + right_hip[0]) / 2.0
         
         # Horizontal displacement (normalized by scale)
-        displacement = (nose_x - shoulder_mid_x) / self.scale_factor
+        # Positive displacement = shoulders right of hips = leaning left
+        displacement = (shoulder_mid_x - hip_mid_x) / self.scale_factor
         
         # Apply deadzone to filter out noise and small movements
         if abs(displacement) < self.lean_deadzone:
