@@ -3,6 +3,7 @@ Action Coordinator - Coordinates gesture detection results with game controls
 """
 
 from controls.keyboard_mouse import MinecraftController
+import numpy as np
 
 # Configuration constants
 HEAD_LOOK_SENSITIVITY = 5.0  # Adjust as needed
@@ -47,12 +48,56 @@ class ActionCoordinator:
             gesture_results: Dictionary of gesture detection results
             state_manager: GestureStateManager instance
         """
+        filtered_results = self._apply_hand_height_gate(gesture_results, state_manager)
+
         # Mode-specific execution
         if self.current_mode == 'gameplay':
-            self._execute_gameplay_actions(gesture_results, state_manager)
+            self._execute_gameplay_actions(filtered_results, state_manager)
         elif self.current_mode == 'menu':
-            self._execute_menu_actions(gesture_results, state_manager)
+            self._execute_menu_actions(filtered_results, state_manager)
     
+
+    def _apply_hand_height_gate(self, gesture_results, state_manager):
+        '''Remove hand-driven gestures when wrists drop below the shoulder-based threshold.'''
+        if not gesture_results:
+            return gesture_results
+
+        left_shoulder = state_manager.get_landmark_position('left_shoulder')
+        right_shoulder = state_manager.get_landmark_position('right_shoulder')
+
+        if left_shoulder is None or right_shoulder is None:
+            return gesture_results
+
+        shoulder_distance = float(np.linalg.norm(left_shoulder - right_shoulder))
+        if shoulder_distance <= 1e-6:
+            return gesture_results
+
+        right_shoulder_y = float(right_shoulder[1])
+        max_allowed_y = right_shoulder_y + shoulder_distance
+
+        filtered_results = dict(gesture_results)
+
+        def wrist_above_threshold(wrist_pos):
+            return wrist_pos is not None and float(wrist_pos[1]) <= max_allowed_y
+
+        left_wrist = state_manager.get_landmark_position('left_wrist')
+        if not wrist_above_threshold(left_wrist):
+            filtered_results.pop('left_hand', None)
+            filtered_results.pop('shield', None)
+            filtered_results.pop('inventory', None)
+            filtered_results.pop('menuclose', None)
+
+        right_wrist = state_manager.get_landmark_position('right_wrist')
+        if not wrist_above_threshold(right_wrist):
+            filtered_results.pop('right_hand', None)
+            filtered_results.pop('cursor_control', None)
+            filtered_results.pop('attack', None)
+            filtered_results.pop('mining', None)
+            filtered_results.pop('placing', None)
+
+        return filtered_results
+
+
     def _execute_gameplay_actions(self, gesture_results, state_manager):
         """
         Execute actions during gameplay mode.
