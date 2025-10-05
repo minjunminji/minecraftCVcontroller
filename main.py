@@ -309,17 +309,48 @@ def main():
             
             # Mirror the frame for preview only
             frame_display = cv2.flip(frame_display, 1)
+            frame_height, frame_width = frame_display.shape[:2]
             
             # Draw textual overlays on mirrored frame
+            font_face = cv2.FONT_HERSHEY_SIMPLEX
             for overlay in overlay_texts:
+                text = overlay['text']
+                position = overlay['position']
+                font_scale = overlay['scale']
+                color = overlay['color']
+                thickness = overlay['thickness']
+                background_color = overlay.get('background', (0, 0, 0))
+                padding = overlay.get('background_padding', 6)
+                
+                if background_color is not None:
+                    text_size, baseline = cv2.getTextSize(
+                        text,
+                        font_face,
+                        font_scale,
+                        thickness
+                    )
+                    text_width, text_height = text_size
+                    x, y = position
+                    top_left_x = max(x - padding, 0)
+                    top_left_y = max(y - text_height - padding, 0)
+                    bottom_right_x = min(x + text_width + padding, frame_width)
+                    bottom_right_y = min(y + baseline + padding, frame_height)
+                    cv2.rectangle(
+                        frame_display,
+                        (top_left_x, top_left_y),
+                        (bottom_right_x, bottom_right_y),
+                        background_color,
+                        -1
+                    )
+                
                 cv2.putText(
                     frame_display,
-                    overlay['text'],
-                    overlay['position'],
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    overlay['scale'],
-                    overlay['color'],
-                    overlay['thickness']
+                    text,
+                    position,
+                    font_face,
+                    font_scale,
+                    color,
+                    thickness
                 )
             
             # Show the frame
