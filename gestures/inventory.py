@@ -8,26 +8,29 @@ from gestures.base_detector import BaseGestureDetector
 
 class InventoryDetector(BaseGestureDetector):
     """
-    Detects inventory open gesture based on left hand crossing motion.
+    Detects inventory open gesture based on left hand velocity.
     
     Logic:
-    - Triggers when left hand begins from left of shoulder and crosses to the right side
-    - Monitors the x-axis position of the left wrist relative to the left shoulder
-    - Detects the crossing motion when wrist moves from left to right of shoulder
+    - Triggers when left wrist velocity exceeds a threshold
+    - Direction must be left-to-right (negative x velocity in MediaPipe coords)
+    - Velocity is normalized to shoulder width for consistency
     """
     
     def __init__(self):
         super().__init__("inventory")
         
-        # Configuration (as ratios of shoulder width)
-        self.start_threshold_ratio = 0.1  # Wrist must be this ratio of shoulder width to the left
-        self.end_threshold_ratio = 0.3    # Wrist must cross this ratio of shoulder width to the right
-        self.cooldown_frames = 30          # Frames to wait before allowing another gesture (1 second at 30fps)
+        # Configuration (velocity threshold as ratio of shoulder width per frame)
+        self.velocity_threshold_ratio = 3  # Velocity must exceed this ratio of shoulder width per frame
+        self.velocity_window_size = 5          # Frames to use for velocity calculation
+        
+        # Displacement requirements (minimum distance to be considered a swipe)
+        self.min_displacement_ratio = 0.9      # Minimum displacement in x direction (as ratio of shoulder width)
+        self.displacement_window_size = 5      # Frames to measure displacement over
+        
+        self.cooldown_frames = 30              # Frames to wait before allowing another gesture (1 second at 30fps)
         
         # State tracking
         self._state = {
-            'gesture_started': False,     # True when wrist is on left side of shoulder
-            'gesture_completed': False,   # True when crossing gesture completes
             'cooldown_counter': 0,        # Frames since last gesture completion
         }
     
@@ -54,32 +57,68 @@ class InventoryDetector(BaseGestureDetector):
         
         return shoulder_width
     
-    def _get_relative_x_position(self, shoulder_pos, wrist_pos):
+    def _get_normalized_velocity(self, state_manager):
         """
-        Calculate the relative x-position of wrist to shoulder.
+        Calculate the velocity of the left wrist normalized by shoulder width.
         
         Args:
-            shoulder_pos: (x, y, z) tuple for shoulder position
-            wrist_pos: (x, y, z) tuple for wrist position
+            state_manager: GestureStateManager instance
         
         Returns:
-            Float: x-difference (positive = wrist is to the right of shoulder)
-                   None if positions are invalid
+            Tuple of (velocity_x, velocity_magnitude) normalized by shoulder width, or (None, None)
         """
-        if shoulder_pos is None or wrist_pos is None:
+        # Get shoulder width for normalization
+        shoulder_width = self._get_shoulder_width(state_manager)
+        if shoulder_width is None:
+            return None, None
+        
+        # Get velocity of left wrist
+        velocity = state_manager.get_velocity('left_wrist', window_size=self.velocity_window_size)
+        if velocity is None:
+            return None, None
+        
+        # Normalize by shoulder width
+        velocity_normalized = velocity / shoulder_width
+        velocity_x = velocity_normalized[0]
+        velocity_magnitude = np.linalg.norm(velocity_normalized)
+        
+        return velocity_x, velocity_magnitude
+    
+    def _get_x_displacement(self, state_manager):
+        """
+        Calculate the displacement in x direction over the displacement window,
+        normalized by shoulder width.
+        
+        Args:
+            state_manager: GestureStateManager instance
+        
+        Returns:
+            Float: x displacement normalized by shoulder width, or None
+        """
+        # Check if we have enough history
+        if len(state_manager.landmark_history) < self.displacement_window_size:
             return None
         
-        # In MediaPipe, x increases from left to right (from camera's perspective)
-        # Since frame is mirrored in the preview, the actual gesture is:
-        # - negative x_diff means wrist is to the left of shoulder
-        # - positive x_diff means wrist is to the right of shoulder
-        x_diff = wrist_pos[0] - shoulder_pos[0]
+        # Get shoulder width for normalization
+        shoulder_width = self._get_shoulder_width(state_manager)
+        if shoulder_width is None:
+            return None
         
-        return x_diff
+        # Get current and past positions
+        current_pos = state_manager.get_landmark_position('left_wrist', frame_offset=0)
+        past_pos = state_manager.get_landmark_position('left_wrist', frame_offset=self.displacement_window_size - 1)
+        
+        if current_pos is None or past_pos is None:
+            return None
+        
+        # Calculate x displacement (normalized by shoulder width)
+        x_displacement = (current_pos[0] - past_pos[0]) / shoulder_width
+        
+        return x_displacement
     
     def detect(self, state_manager):
         """
-        Detect inventory open gesture from left hand crossing motion.
+        Detect inventory open gesture from left hand velocity and displacement.
         
         Args:
             state_manager: GestureStateManager instance
@@ -97,78 +136,53 @@ class InventoryDetector(BaseGestureDetector):
             self._state['cooldown_counter'] -= 1
             return None
         
-        # Get shoulder width for relative thresholds
+        # Get normalized velocity
+        velocity_x, velocity_magnitude = self._get_normalized_velocity(state_manager)
+        
+        if velocity_x is None or velocity_magnitude is None:
+            return None
+        
+        # Check if velocity exceeds threshold
+        if velocity_magnitude < self.velocity_threshold_ratio:
+            return None
+        
+        # Check direction: left-to-right swipe
+        # In MediaPipe coordinates (not mirrored), x increases from left to right
+        # Since the display is mirrored, a left-to-right swipe (as seen by user) 
+        # means moving from high x to low x in MediaPipe coordinates
+        # So we need NEGATIVE x velocity for left-to-right swipe (as seen by user)
+        if velocity_x >= 0:
+            # Positive velocity = moving left in MediaPipe coords = right-to-left as seen by user
+            return None
+        
+        # Check displacement requirement
+        x_displacement = self._get_x_displacement(state_manager)
+        if x_displacement is None:
+            return None
+        
+        # For left-to-right swipe (as seen by user), we need negative displacement in MediaPipe coords
+        # The displacement must exceed the minimum threshold
+        if x_displacement >= 0 or abs(x_displacement) < self.min_displacement_ratio:
+            # Either wrong direction or insufficient displacement
+            return None
+        
+        # Velocity and displacement are both sufficient and direction is correct!
+        self._state['cooldown_counter'] = self.cooldown_frames
+        
         shoulder_width = self._get_shoulder_width(state_manager)
-        if shoulder_width is None:
-            self._state['gesture_started'] = False
-            return None
         
-        # Calculate absolute thresholds based on shoulder width
-        # Note: MediaPipe coordinates are NOT mirrored, only the display is
-        # So we need to swap the logic: 
-        # - start_threshold should be positive (wrist to the RIGHT of shoulder in MediaPipe coords)
-        # - end_threshold should be negative (wrist crosses to the LEFT in MediaPipe coords)
-        # This appears as left-to-right motion to the user viewing the mirrored display
-        start_threshold = self.start_threshold_ratio * shoulder_width
-        end_threshold = -self.end_threshold_ratio * shoulder_width
-        
-        # Get left shoulder and wrist positions from state manager
-        left_shoulder = state_manager.get_landmark_position('left_shoulder', frame_offset=0)
-        left_wrist = state_manager.get_landmark_position('left_wrist', frame_offset=0)
-        
-        if left_shoulder is None or left_wrist is None:
-            # Can't detect without landmarks, reset gesture state
-            self._state['gesture_started'] = False
-            return None
-        
-        # Convert numpy arrays to tuples for consistency
-        shoulder_pos = tuple(left_shoulder)
-        wrist_pos = tuple(left_wrist)
-        
-        # Get relative x position
-        x_diff = self._get_relative_x_position(shoulder_pos, wrist_pos)
-        
-        if x_diff is None:
-            self._state['gesture_started'] = False
-            return None
-        
-        
-        # State machine for gesture detection
-        # Step 1: Check if wrist is on the right side (gesture start - in MediaPipe coords)
-        if not self._state['gesture_started']:
-            if x_diff >= start_threshold:
-                # Wrist is on the right side of shoulder (in MediaPipe) - gesture started
-                self._state['gesture_started'] = True
-                return None
-        
-        # Step 2: Check if wrist has crossed to the left side (gesture complete - in MediaPipe coords)
-        else:
-            if x_diff <= end_threshold:
-                # Wrist has crossed to the left side (in MediaPipe) - gesture complete!
-                self._state['gesture_started'] = False
-                self._state['gesture_completed'] = True
-                self._state['cooldown_counter'] = self.cooldown_frames
-                
-                return {
-                    'action': 'inventory_open',
-                    'x_diff': x_diff,
-                    'shoulder_width': shoulder_width,
-                    'start_threshold': start_threshold,
-                    'end_threshold': end_threshold
-                }
-            elif x_diff >= start_threshold:
-                # Wrist is still on the right side, keep waiting
-                return None
-            else:
-                # Wrist is in the middle zone, continue tracking
-                return None
-        
-        return None
+        return {
+            'action': 'inventory_open',
+            'velocity_x': velocity_x,
+            'velocity_magnitude': velocity_magnitude,
+            'x_displacement': x_displacement,
+            'shoulder_width': shoulder_width,
+            'velocity_threshold': self.velocity_threshold_ratio,
+            'displacement_threshold': self.min_displacement_ratio
+        }
     
     def reset(self):
         """Reset inventory detector state."""
         self._state = {
-            'gesture_started': False,
-            'gesture_completed': False,
             'cooldown_counter': 0,
         }
