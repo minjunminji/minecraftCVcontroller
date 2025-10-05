@@ -19,7 +19,7 @@ from gestures.placing import PlacingDetector
 from gestures.movement import MovementDetector
 from gestures.inventory import InventoryDetector
 from gestures.menuclose import MenuCloseDetector
-from gestures.cursor_control import CursorControlDetector
+from gestures.cursor_control import CursorControlDetector, is_in_menu_mode
 from gestures.attack import AttackDetector
 from gestures.looking import LookingDetector
 
@@ -95,7 +95,7 @@ def main():
     print("  'q' - Quit application")
     print("  'r' - Toggle gestures ON/OFF")
     print("  'd' - Toggle debug display")
-    print("  'm' - Toggle menu/cursor mode")
+    # Menu mode is auto-detected (cursor free/locked) or via left-hand swipe
     print("  'c' - Calibrate neutral pose")
     print("\nWaiting for person detection...")
     
@@ -106,8 +106,8 @@ def main():
     fps_start_time = time.time()
     current_fps = 0
     
-    # Manual menu/cursor mode toggle
-    menu_mode_enabled = None  # Toggle with 'm' key
+    # Track OS cursor free/locked to trigger menu entry automatically
+    cursor_free_prev = None
     
     # Global gesture enable/disable toggle
     gestures_enabled = False  # Toggle with 'r' key
@@ -140,11 +140,22 @@ def main():
             # === STEP 3: Run gesture detection ===
             gesture_results = {}
             if landmarks_dict is not None and gestures_enabled:
+                # Detect OS cursor free/locked and inject mode switch to enter menu
+                try:
+                    cursor_free = is_in_menu_mode()
+                except Exception:
+                    cursor_free = None
+                if cursor_free is not None and cursor_free_prev is not None:
+                    if (not cursor_free_prev) and cursor_free:
+                        # Cursor just became free: enter menu without pressing E
+                        gesture_results['mode_switch'] = 'cursor_released'
+                cursor_free_prev = cursor_free if cursor_free is not None else cursor_free_prev
                 # Run all enabled gesture detectors
                 for name, detector in gesture_detectors.items():
                     # Pass menu mode flag to cursor_control detector
                     if name == 'cursor_control':
-                        result = detector.detect(state_manager, force_menu_mode=menu_mode_enabled)
+                        # Auto-detect based on OS cursor state inside detector
+                        result = detector.detect(state_manager, force_menu_mode=None)
                     else:
                         result = detector.detect(state_manager)
                     if result is not None:
@@ -505,16 +516,21 @@ def main():
                     'background_padding': 8
                 })
                 
-                # Show menu mode status
-                mode_text = f"Menu Mode: {'ON' if menu_mode_enabled else 'OFF'}"
-                mode_color = (0, 255, 0) if menu_mode_enabled else (128, 128, 128)
-                overlay_texts.append({
-                    'text': mode_text,
-                    'position': (10, frame_height - 70),
-                    'scale': 0.5,
-                    'color': mode_color,
-                    'thickness': 2
-                })
+                # Show OS cursor detection (free vs locked)
+                try:
+                    cursor_free = is_in_menu_mode()
+                except Exception:
+                    cursor_free = None
+                if cursor_free is not None:
+                    cursor_text = f"Cursor: {'FREE' if cursor_free else 'LOCKED'}"
+                    cursor_color = (0, 255, 0) if cursor_free else (128, 128, 128)
+                    overlay_texts.append({
+                        'text': cursor_text,
+                        'position': (10, frame_height - 70),
+                        'scale': 0.5,
+                        'color': cursor_color,
+                        'thickness': 2
+                    })
                 
                 overlay_texts.append({
                     'text': f"FPS: {current_fps:.1f}",
@@ -525,7 +541,7 @@ def main():
                 })
                 
                 overlay_texts.append({
-                    'text': "MineMotion - Press 'q' to quit, 'd' for debug, 'm' for menu mode, 'r' to toggle gestures",
+                    'text': "MineMotion - Press 'q' to quit, 'd' for debug, 'r' to toggle gestures",
                     'position': (10, frame_height - 10),
                     'scale': 0.4,
                     'color': (255, 255, 255),
@@ -599,9 +615,6 @@ def main():
             elif key == ord('d'):
                 debug_display = not debug_display
                 print(f"\nDebug display: {'ON' if debug_display else 'OFF'}")
-            elif key == ord('m'):
-                menu_mode_enabled = not menu_mode_enabled
-                print(f"\nMenu/Cursor mode: {'ON' if menu_mode_enabled else 'OFF'}")
             elif key == ord('c'):
                 if landmarks_dict is not None:
                     state_manager.set_calibration_baseline(landmarks_dict)

@@ -308,9 +308,11 @@ class CursorControlDetector(BaseGestureDetector):
             # Manual override
             in_menu = force_menu_mode
         else:
-            # Automatic detection (currently commented out)
-            # in_menu = is_in_menu_mode()
-            in_menu = False  # Default to off when not forced
+            # Automatic detection using OS cursor visibility/lock state
+            try:
+                in_menu = is_in_menu_mode()
+            except Exception:
+                in_menu = False
         
         if not in_menu:
             self._state['last_cursor_x'] = None

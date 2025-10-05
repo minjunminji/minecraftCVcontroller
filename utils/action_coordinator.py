@@ -262,15 +262,13 @@ class ActionCoordinator:
     def _handle_mode_switches(self, gesture_results):
         """Handle switching between gameplay and menu modes."""
         mode_switch = gesture_results.get('mode_switch')
-        
+
         if mode_switch == 'enter_menu':
             self._enter_menu_mode(open_inventory=True)
         elif mode_switch == 'cursor_released':
             self._enter_menu_mode(open_inventory=False)
-        elif mode_switch == 'cursor_locked':
-            self._exit_menu_mode()
-        elif mode_switch == 'exit_menu':
-            self._exit_menu_mode()
+        # Per spec, exiting menu mode should ONLY happen via left-hand swipe
+        # (handled as 'menu_close' in _execute_menu_actions)
     
     def _execute_menu_actions(self, gesture_results, state_manager):
         """
@@ -338,8 +336,7 @@ class ActionCoordinator:
         menu_action = gesture_results.get('menu_action')
         if menu_action == 'select':
             self.controller.click_mouse('left')
-        elif menu_action == 'back':
-            self._exit_menu_mode()
+        # Do not exit menu via generic 'back' to enforce left-hand swipe-only exit
         
         # NOTE: All right hand gameplay gestures (attack, mining, placing)
         # are intentionally IGNORED in menu mode

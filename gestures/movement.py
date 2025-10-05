@@ -21,12 +21,22 @@ from gestures.base_detector import BaseGestureDetector
 
 
 # Detection thresholds (tuned for stability over speed)
-WALK_ENTER_THRESHOLD = 0.20   # Enter WALKING state
-WALK_EXIT_THRESHOLD = 0.08    # Exit to IDLE (hysteresis gap)
-VISIBILITY_THRESHOLD = 0.6     # MediaPipe visibility confidence minimum
-MIN_STABLE_FRAMES = 2          # Frames required for stable state transition
-LEAN_THRESHOLD = 0.007         # Normalized X-displacement for torso lean (shoulder-to-hip method)
-LEAN_DEADZONE = 0.003          # Minimum displacement to ignore (noise/small movements)
+# Movement thresholds
+WALK_ENTER_THRESHOLD = 0.28   # Enter WALKING state (higher to reduce false triggers)
+WALK_EXIT_THRESHOLD = 0.12    # Exit to IDLE (hysteresis gap)
+VISIBILITY_THRESHOLD = 0.7     # MediaPipe visibility confidence minimum (stricter)
+MIN_STABLE_FRAMES = 3          # Frames required for stable state transition
+
+# Leg motion signal shaping
+LEG_MIN_SPEED = 0.04           # Minimum normalized vertical speed to consider
+LEG_MIN_RANGE = 0.015          # Minimum normalized vertical range to consider
+ANTI_PHASE_WINDOW = 5          # Frames to evaluate left/right anti-phase pattern
+ANTI_PHASE_MIN_RATIO = 0.6     # Proportion of frames needing opposite vertical velocity signs
+
+# Lean/strafe thresholds (with hysteresis)
+LEAN_ENTER_THRESHOLD = 0.025   # Enter lean state (normalized by scale)
+LEAN_EXIT_THRESHOLD = 0.012    # Exit lean state (hysteresis)
+LEAN_DEADZONE = 0.010          # Minimum displacement to ignore (noise/small movements)
 LEAN_COOLDOWN_FRAMES = 10      # Frames to wait after lean ends before allowing walking (0.5s at 30fps)
 
 
@@ -99,22 +109,27 @@ class MovementDetector(BaseGestureDetector):
     which is more robust to camera angles than 3D vector approaches.
     """
     
-    def __init__(self, lean_threshold=LEAN_THRESHOLD, lean_deadzone=LEAN_DEADZONE):
+    def __init__(self, 
+                 lean_enter_threshold=LEAN_ENTER_THRESHOLD, 
+                 lean_exit_threshold=LEAN_EXIT_THRESHOLD,
+                 lean_deadzone=LEAN_DEADZONE):
         super().__init__("movement")
         
         # State machine for IDLE ↔ WALKING transitions
         self.movement_state = MovementState()
         
         # Smoothing buffers for temporal filtering
-        self.leg_motion_history = deque(maxlen=3)
-        self.lean_history = deque(maxlen=3)
+        self.leg_motion_history = deque(maxlen=5)
+        self.lean_history = deque(maxlen=5)
+        self.anti_phase_history = deque(maxlen=ANTI_PHASE_WINDOW)
         
         # Calibration data
         self.scale_factor = None  # Torso height for normalization
         self.baseline_ankle_y = None
         
         # Configurable lean detection thresholds
-        self.lean_threshold = lean_threshold
+        self.lean_enter_threshold = lean_enter_threshold
+        self.lean_exit_threshold = lean_exit_threshold
         self.lean_deadzone = lean_deadzone
         
         # Lean cooldown tracking for hysteresis
@@ -152,7 +167,6 @@ class MovementDetector(BaseGestureDetector):
         
         # Detect torso lean for strafing first (to track state changes)
         torso_lean = self._detect_torso_lean_simple(state_manager)
-        print(f"torso lean: {torso_lean}")
         
         # Track lean state changes for cooldown management
         if self.last_lean_detected is not None and torso_lean is None:
@@ -169,16 +183,14 @@ class MovementDetector(BaseGestureDetector):
         
         # Detect leg motion (walking-in-place)
         leg_motion_score = self._detect_leg_motion(state_manager)
-        print(f"leg motion score {leg_motion_score}")
         
         # Apply cooldown: suppress walking detection if we're in cooldown period
         if self.lean_cooldown_timer > 0:
-            print(f"Lean cooldown active ({self.lean_cooldown_timer} frames remaining) - suppressing walking")
-            leg_motion_score = 0.0  # Force no walking detection during cooldown
+            # Suppress walking detection during cooldown after a lean ends
+            leg_motion_score = 0.0
         
         # Update state machine with hysteresis
         is_walking = self.movement_state.update(leg_motion_score)
-        print(f"is walking? {is_walking}")
         
         # Return result if any movement detected
         if is_walking or torso_lean is not None:
@@ -255,9 +267,11 @@ class MovementDetector(BaseGestureDetector):
             return 0.0
         
         # Extract Y-component (vertical motion in image coordinates)
-        # Note: Y increases downward in image coords, so we use absolute value
-        left_vy = abs(left_vel[1])
-        right_vy = abs(right_vel[1])
+        # Normalize by scale so values are relative to body size
+        left_vy_raw = left_vel[1] / self.scale_factor
+        right_vy_raw = right_vel[1] / self.scale_factor
+        left_vy = abs(left_vy_raw)
+        right_vy = abs(right_vy_raw)
         avg_vertical_speed = (left_vy + right_vy) / 2.0
         
         # Calculate range of motion (Y-coordinate variation over window)
@@ -266,14 +280,32 @@ class MovementDetector(BaseGestureDetector):
         avg_range = (left_range + right_range) / 2.0
         
         # Normalize by scale factor (body dimensions)
-        normalized_speed = avg_vertical_speed / self.scale_factor
+        normalized_speed = avg_vertical_speed
         normalized_range = avg_range / self.scale_factor
+
+        # Apply basic deadzones to ignore tiny vibrations
+        if normalized_speed < LEG_MIN_SPEED and normalized_range < LEG_MIN_RANGE:
+            normalized_speed = 0.0
+            normalized_range = 0.0
         
         # Combined score: velocity + range indicates walking
         # Scale factors chosen to bring scores into ~0-1 range
-        velocity_component = normalized_speed * 10.0
-        range_component = normalized_range * 5.0
+        velocity_component = normalized_speed * 8.0
+        range_component = normalized_range * 4.0
         leg_motion_score = (velocity_component + range_component) / 2.0
+
+        # Anti-phase gating: walking-in-place exhibits opposite vertical
+        # velocities between left/right legs. Suppress score if not present
+        # in a short temporal window to avoid false positives from body sway.
+        opposite_sign = (
+            left_vy_raw * right_vy_raw < 0 and
+            left_vy >= LEG_MIN_SPEED and right_vy >= LEG_MIN_SPEED
+        )
+        self.anti_phase_history.append(1 if opposite_sign else 0)
+        if len(self.anti_phase_history) >= max(3, ANTI_PHASE_WINDOW // 2):
+            ratio = sum(self.anti_phase_history) / len(self.anti_phase_history)
+            if ratio < ANTI_PHASE_MIN_RATIO:
+                leg_motion_score = 0.0
         
         # Apply temporal smoothing to reduce jitter
         self.leg_motion_history.append(leg_motion_score)
@@ -418,26 +450,39 @@ class MovementDetector(BaseGestureDetector):
         # Horizontal displacement (normalized by scale)
         # Positive displacement = shoulders right of hips = leaning left
         displacement = (shoulder_mid_x - hip_mid_x) / self.scale_factor
-        
+
+        magnitude = abs(displacement)
+        direction = 'left' if displacement > 0 else 'right'
+
         # Apply deadzone to filter out noise and small movements
-        if abs(displacement) < self.lean_deadzone:
+        if magnitude < self.lean_deadzone:
             lean = None
-        # Apply thresholds to determine lean direction (swapped: positive = left)
-        elif displacement > self.lean_threshold:
-            lean = 'left'
-        elif displacement < -self.lean_threshold:
-            lean = 'right'
         else:
-            lean = None
+            prev = self.last_lean_detected
+            # Hysteresis: require larger magnitude to enter than to stay
+            if prev is None:
+                if magnitude >= self.lean_enter_threshold:
+                    lean = direction
+                else:
+                    lean = None
+            else:
+                if direction == prev:
+                    # Stay in current lean until it drops below exit threshold
+                    lean = prev if magnitude >= self.lean_exit_threshold else None
+                else:
+                    # Switching sides requires meeting enter threshold
+                    lean = direction if magnitude >= self.lean_enter_threshold else None
         
         # Apply temporal smoothing: require consistent lean for 2/3 frames
         self.lean_history.append(lean)
-        
-        if len(self.lean_history) >= 2:
-            # Return lean only if last 2 frames agree
-            if self.lean_history[-1] == self.lean_history[-2]:
+
+        # Temporal smoothing with hysteresis-aware consistency:
+        # Require 3 consecutive matching frames to assert a lean,
+        # which dramatically reduces flicker and false strafes.
+        if len(self.lean_history) >= 3:
+            if self.lean_history[-1] == self.lean_history[-2] == self.lean_history[-3]:
                 return self.lean_history[-1]
-        
+
         return None
     
     def reset(self):

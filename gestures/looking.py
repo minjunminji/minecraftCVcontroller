@@ -27,11 +27,12 @@ class LookingDetector(BaseGestureDetector):
         
         # Configuration for vertical (up/down) control
         # Thresholds operate on shoulder-normalized distances (scale-invariant)
-        self.y_threshold = 0.015  # If |avg Y distance|/shoulder_dist > this, tilt detected (adjustable)
-        self.y_deadzone = 0.1  # Deadzone for vertical movement (adjustable)
+        # Only one threshold is used for tilt UP; tilt DOWN has no deadzone/threshold.
+        self.y_threshold = 0.07  # Threshold for tilt UP only (|avg Y| / shoulder_dist)
+        self.y_deadzone = 0.1  # Not applied to vertical logic (kept for potential future use)
         
         # Mouse movement speed
-        self.mouse_speed = 7  # Base speed units per frame (scaled by HEAD_LOOK_SENSITIVITY in coordinator)
+        self.mouse_speed = 15  # Base speed units per frame (scaled by HEAD_LOOK_SENSITIVITY in coordinator)
         
         # Facial landmark indices
         self.left_edge = 127  # Left face edge
@@ -201,7 +202,8 @@ class LookingDetector(BaseGestureDetector):
 
         # Fallback: if we cannot compute a reliable shoulder distance, use raw avg_y_distance
         value_for_threshold = avg_y_normalized if avg_y_normalized is not None else avg_y_distance
-        y_threshold_value = self.y_threshold + self.y_deadzone
+        # For tilt UP, use ONLY the base threshold (no additional deadzone)
+        y_threshold_value = self.y_threshold
 
         # Head tilted UP: requires threshold (canthus significantly ABOVE face edge)
         if value_for_threshold < -y_threshold_value:
