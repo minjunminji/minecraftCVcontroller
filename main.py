@@ -258,6 +258,23 @@ def main():
                     })
                     y_pos += 30
 
+                    # Show placing detector debug info
+                    placing_result = gesture_results.get('placing')
+                    if isinstance(placing_result, dict) and 'debug_info' in placing_result:
+                        debug_info = placing_result['debug_info']
+                        area = debug_info['normalized_area']
+                        is_above = debug_info['is_above_threshold']
+                        threshold = debug_info['open_threshold']
+                        area_color = (0, 255, 0) if is_above else (0, 165, 255)
+                        overlay_texts.append({
+                            'text': f"Palm Area: {area:.4f} {'>' if is_above else '<'} {threshold:.4f}",
+                            'position': (left_x, y_pos),
+                            'scale': 0.5,
+                            'color': area_color,
+                            'thickness': 2
+                        })
+                        y_pos += 25
+
                     # Show cursor coordinates from cursor_control (if available)
                     cursor_result = gesture_results.get('cursor_control')
                     if isinstance(cursor_result, dict):

@@ -20,13 +20,13 @@ class PlacingDetector(BaseGestureDetector):
         # Hand spread thresholds (normalized by shoulder distance for camera independence)
         # Note: Values depend on shoulder-based normalization, may need adjustment
         self.close_threshold = 0.015  # Closed hand threshold
-        self.open_threshold = 0.045   # Open hand threshold
-        self.min_area_delta = 0.030   # Minimum area increase
-        self.area_growth_rate_threshold = 0.25  # Minimum growth rate
+        self.open_threshold = 0.040   # Slightly lower open hand threshold
+        self.min_area_delta = 0.025   # Reduced minimum area increase
+        self.area_growth_rate_threshold = 0.07  # Halved minimum growth rate (more lenient)
         
         # Alternative/fallback thresholds for robust detection
-        self.fallback_open_threshold = 0.035  # Lower threshold for fallback
-        self.fallback_area_delta = 0.040  # Higher delta for fallback
+        self.fallback_open_threshold = 0.030  # More lenient fallback threshold
+        self.fallback_area_delta = 0.035  # Adjusted delta for fallback
         
         # Timing thresholds (seconds)
         self.close_to_open_window = 0.6  # Even longer window for natural motion
@@ -154,6 +154,12 @@ class PlacingDetector(BaseGestureDetector):
                 "area": round(normalized_area, 4),
                 "area_increase": round(area_increase, 4),
                 "growth_rate": round(growth_rate, 4) if growth_rate else 0.0,
+                "debug_info": {
+                    "normalized_area": round(normalized_area, 4),
+                    "is_above_threshold": normalized_area >= self.open_threshold,
+                    "open_threshold": self.open_threshold,
+                    "close_threshold": self.close_threshold
+                }
             }
 
         self._state["last_area"] = normalized_area

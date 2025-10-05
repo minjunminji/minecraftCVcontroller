@@ -28,7 +28,7 @@ class MiningDetector(BaseGestureDetector):
         
         # Y-axis velocity threshold: Higher = requires faster vertical stabbing
         # Default: 1.3 (increase to 1.8 for more aggressive stabs only)
-        self.y_velocity_threshold = 1.3
+        self.y_velocity_threshold = 1
         
         # X-axis velocity threshold: Lower = requires more strictly vertical movement
         # Default: 0.8 (decrease to 0.5-0.6 to avoid false triggers from horizontal movement)
