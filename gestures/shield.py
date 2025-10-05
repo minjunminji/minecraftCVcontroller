@@ -4,6 +4,7 @@ Shield gesture detector - detects shield blocking gesture
 
 # may need to change logic to look at change in y position
 
+import time
 import numpy as np
 from gestures.base_detector import BaseGestureDetector
 
@@ -32,6 +33,7 @@ class ShieldDetector(BaseGestureDetector):
         # State tracking
         self._state = {
             'is_blocking': False,
+            'horizontal_start_time': None,
         }
     
     def _calculate_forearm_angle(self, elbow_pos, wrist_pos):
@@ -161,16 +163,28 @@ class ShieldDetector(BaseGestureDetector):
         # Update state and return action
         if is_blocking_position:
             if not self._state['is_blocking']:
-                # Start blocking
-                self._state['is_blocking'] = True
-                angle = self._calculate_forearm_angle(elbow_pos, wrist_pos)
-                return {
-                    'action': 'shield_start',
-                    'horizontal': is_horizontal,
-                    'forward': is_forward,
-                    'chest_height': is_chest_height,
-                    'angle': angle
-                }
+                # Track time in blocking position
+                if self._state['horizontal_start_time'] is None:
+                    # First frame in blocking position - record start time
+                    self._state['horizontal_start_time'] = time.time()
+                    return None
+                
+                # Check if 0.5 seconds have elapsed
+                elapsed_time = time.time() - self._state['horizontal_start_time']
+                if elapsed_time >= 0.5:
+                    # Start blocking after 0.5 second delay
+                    self._state['is_blocking'] = True
+                    angle = self._calculate_forearm_angle(elbow_pos, wrist_pos)
+                    return {
+                        'action': 'shield_start',
+                        'horizontal': is_horizontal,
+                        'forward': is_forward,
+                        'chest_height': is_chest_height,
+                        'angle': angle
+                    }
+                else:
+                    # Still within 0.5 second window
+                    return None
             else:
                 # Continue blocking
                 angle = self._calculate_forearm_angle(elbow_pos, wrist_pos)
@@ -182,6 +196,8 @@ class ShieldDetector(BaseGestureDetector):
                     'angle': angle
                 }
         else:
+            # Reset timer when not in blocking position
+            self._state['horizontal_start_time'] = None
             if self._state['is_blocking']:
                 # Stop blocking
                 self._state['is_blocking'] = False
@@ -192,4 +208,5 @@ class ShieldDetector(BaseGestureDetector):
         """Reset shield detector state."""
         self._state = {
             'is_blocking': False,
+            'horizontal_start_time': None,
         }
