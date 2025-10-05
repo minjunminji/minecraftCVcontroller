@@ -85,8 +85,9 @@ class CursorControlDetector(BaseGestureDetector):
         super().__init__("cursor_control")
         
         # Configuration
-        self.pinch_threshold = 0.015  # Distance threshold for pinch detection (in normalized coords) - SMALLER = more sensitive
+        self.pinch_threshold = 0.06  # Distance threshold for pinch detection (in normalized coords) - SMALLER = more sensitive
         self.pinch_release_threshold = 0.06  # Distance to release pinch (add hysteresis)
+        self.freeze_threshold = 0.10  # Distance to freeze cursor movement (preparing for click)
         self.smoothing_factor = 0.7  # Smoothing for cursor movement (0=no smooth, 1=full smooth) - HIGHER = more responsive
         self.sensitivity_multiplier = 1.0  # Movement sensitivity (shoulder width = full screen when 1.0)
         self.click_cooldown_frames = 15  # Minimum frames between clicks (prevents double-click at 30fps)
@@ -105,13 +106,33 @@ class CursorControlDetector(BaseGestureDetector):
             'shoulder_width': None,  # Cached shoulder width
             'click_cooldown': 0,  # Frames since last click
             'pinch_start_distance': None,  # Distance when pinch started
+            'cursor_frozen': False,  # True when cursor movement is frozen for clicking
+            'frozen_cursor_x': None,  # Frozen cursor position
+            'frozen_cursor_y': None,
         }
     
     def _get_screen_width(self):
         """Get screen width based on platform."""
         if sys.platform.startswith("win"):
             import ctypes
-            return ctypes.windll.user32.GetSystemMetrics(0)
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            # Ensure DPI awareness so metrics return physical pixels
+            try:
+                user32.SetProcessDPIAware()
+            except Exception:
+                pass
+            width = user32.GetSystemMetrics(0)
+            if width <= 0:
+                # Fallback: use desktop window rect
+                try:
+                    rect = wintypes.RECT()
+                    hwnd = user32.GetDesktopWindow()
+                    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                    width = rect.right - rect.left
+                except Exception:
+                    width = 1920  # sensible default
+            return int(width) if width and width > 0 else 1920
         elif sys.platform == "darwin":
             from AppKit import NSScreen
             return int(NSScreen.mainScreen().frame().size.width)
@@ -122,7 +143,24 @@ class CursorControlDetector(BaseGestureDetector):
         """Get screen height based on platform."""
         if sys.platform.startswith("win"):
             import ctypes
-            return ctypes.windll.user32.GetSystemMetrics(1)
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            # Ensure DPI awareness so metrics return physical pixels
+            try:
+                user32.SetProcessDPIAware()
+            except Exception:
+                pass
+            height = user32.GetSystemMetrics(1)
+            if height <= 0:
+                # Fallback: use desktop window rect
+                try:
+                    rect = wintypes.RECT()
+                    hwnd = user32.GetDesktopWindow()
+                    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                    height = rect.bottom - rect.top
+                except Exception:
+                    height = 1080  # sensible default
+            return int(height) if height and height > 0 else 1080
         elif sys.platform == "darwin":
             from AppKit import NSScreen
             return int(NSScreen.mainScreen().frame().size.height)
@@ -170,37 +208,59 @@ class CursorControlDetector(BaseGestureDetector):
     
     def _map_hand_to_screen(self, hand_pos, center_pos, shoulder_width):
         """
-        Map hand position to screen coordinates using shoulder-width-based scaling.
-        
+        Map finger position to absolute screen coordinates using a 16:9 control
+        rectangle centered on the right shoulder. The rectangle's total width is
+        (2.5 × shoulder distance) in normalized space; height is set to keep 16:9.
+
         Args:
-            hand_pos: (x, y, z) tuple with normalized coordinates
-            center_pos: (x, y) tuple for center/neutral position
-            shoulder_width: Float, distance between shoulders
-        
+            hand_pos: (x, y, z) tuple for the controlling point (index fingertip preferred)
+            center_pos: (x, y) tuple for the right shoulder position
+            shoulder_width: Float distance between shoulders in normalized coords
+
         Returns:
             (screen_x, screen_y) tuple, or None if invalid
         """
-        if hand_pos is None or center_pos is None or shoulder_width is None or shoulder_width == 0:
+        if hand_pos is None or center_pos is None or shoulder_width is None or shoulder_width <= 0:
             return None
-        
-        # Calculate relative movement from center
-        # Positive dx = hand moved right, negative = left
-        dx = center_pos[0] - hand_pos[0]  # Flip for natural control
+
+        # Define control rectangle dimensions in normalized coordinates
+        control_width_norm = shoulder_width * 2.5 * self.sensitivity_multiplier
+        control_height_norm = control_width_norm * 9.0 / 16.0
+
+        if control_width_norm <= 1e-6 or control_height_norm <= 1e-6:
+            return None
+
+        half_w = control_width_norm / 2.0
+        half_h = control_height_norm / 2.0
+
+        # Relative movement from right shoulder center
+        # Flip X for natural control; Y positive is down in image/screen space
+        dx = center_pos[0] - hand_pos[0]
         dy = hand_pos[1] - center_pos[1]
-        
-        # Scale by sensitivity: shoulder_width movement = full screen width
-        # So dx of shoulder_width should move cursor screen_width pixels
-        scale_x = self.screen_width / shoulder_width * self.sensitivity_multiplier
-        scale_y = self.screen_height / shoulder_width * self.sensitivity_multiplier
-        
-        # Calculate screen position (center of screen + scaled offset)
-        screen_x = int(self.screen_width / 2 + dx * scale_x)
-        screen_y = int(self.screen_height / 2 + dy * scale_y)
-        
+
+        # Clamp within the control rectangle
+        if dx < -half_w:
+            dx = -half_w
+        elif dx > half_w:
+            dx = half_w
+
+        if dy < -half_h:
+            dy = -half_h
+        elif dy > half_h:
+            dy = half_h
+
+        # Normalize to [-1, 1] within the rectangle
+        rel_x = dx / half_w
+        rel_y = dy / half_h
+
+        # Map to full screen dimensions (rectangle maps to whole screen)
+        screen_x = int(self.screen_width / 2 + rel_x * (self.screen_width / 2))
+        screen_y = int(self.screen_height / 2 + rel_y * (self.screen_height / 2))
+
         # Clamp to screen bounds
         screen_x = max(0, min(screen_x, self.screen_width - 1))
         screen_y = max(0, min(screen_y, self.screen_height - 1))
-        
+
         return (screen_x, screen_y)
     
     def _smooth_position(self, new_pos, last_pos):
@@ -246,61 +306,79 @@ class CursorControlDetector(BaseGestureDetector):
             self._state['last_cursor_y'] = None
             return None
         
-        # Debug: Print that we're in menu mode
-        print(f"🎮 [CURSOR] In menu mode, cursor control active")
+        # In menu mode, cursor control is active
         
         # Get right hand landmarks (MediaPipe hand tracking)
         # MediaPipe hand landmark names:
         # - Wrist: right_wrist (from pose) or can use hand landmark 0
         # - Thumb tip: right_thumb_tip (landmark 4)
         # - Index finger tip: right_index_finger_tip (landmark 8)
-        right_wrist = state_manager.get_landmark_position('right_wrist', frame_offset=0)
         right_thumb_tip = state_manager.get_landmark_position('right_thumb_tip', frame_offset=0)
         right_index_tip = state_manager.get_landmark_position('right_index_finger_tip', frame_offset=0)
         
-        if right_wrist is None:
-            # No hand detected
+        # Require both thumb tip and index tip for control
+        if right_thumb_tip is None or right_index_tip is None:
             self._state['last_cursor_x'] = None
             self._state['last_cursor_y'] = None
             return None
-        
-        # Convert numpy arrays to tuples
-        wrist_pos = tuple(right_wrist)
         
         # Get shoulder width for scaling
         shoulder_width = self._get_shoulder_width(state_manager)
         if shoulder_width is None:
             return None
         
+        # Ensure screen dimensions are valid (guard against 0/None)
+        if not isinstance(self.screen_width, int) or self.screen_width <= 1:
+            self.screen_width = self._get_screen_width()
+        if not isinstance(self.screen_height, int) or self.screen_height <= 1:
+            self.screen_height = self._get_screen_height()
+
         # Cache shoulder width
         self._state['shoulder_width'] = shoulder_width
         
-        # Set or update center position (neutral position)
+        # Get right shoulder position to serve as dynamic center
+        right_shoulder = state_manager.get_landmark_position('right_shoulder', frame_offset=0)
+        if right_shoulder is None:
+            return None
+        center_pos = (float(right_shoulder[0]), float(right_shoulder[1]))
         if self._state['center_pos'] is None:
-            # First time - set current wrist position as center
-            self._state['center_pos'] = (wrist_pos[0], wrist_pos[1])
-            print(f"📍 [CURSOR] Center position set to {self._state['center_pos']}")
+            self._state['center_pos'] = center_pos
+        else:
+            # Continuously update center to follow shoulder motion
+            self._state['center_pos'] = center_pos
         
-        # Map wrist position to screen coordinates using shoulder-width scaling
-        screen_pos = self._map_hand_to_screen(wrist_pos, self._state['center_pos'], shoulder_width)
+        # Cursor controlled by midpoint between thumb tip and index tip
+        thumb_pos = tuple(right_thumb_tip)
+        index_pos = tuple(right_index_tip)
+        controlling_pos = (
+            (thumb_pos[0] + index_pos[0]) / 2.0,
+            (thumb_pos[1] + index_pos[1]) / 2.0,
+            (thumb_pos[2] + index_pos[2]) / 2.0,
+        )
+
+        # Before mapping, ensure the wrist is inside the control rectangle
+        control_width_norm = shoulder_width * 2.5 * self.sensitivity_multiplier
+        control_height_norm = control_width_norm * 9.0 / 16.0
+        half_w = control_width_norm / 2.0
+        half_h = control_height_norm / 2.0
+
+        dx = self._state['center_pos'][0] - controlling_pos[0]
+        dy = controlling_pos[1] - self._state['center_pos'][1]
+        if abs(dx) > half_w or abs(dy) > half_h:
+            # Outside control area: fully disable cursor control this frame
+            self._state['last_cursor_x'] = None
+            self._state['last_cursor_y'] = None
+            return None
+
+        # Map wrist position within 16:9 rectangle (centered at shoulder) to full screen
+        screen_pos = self._map_hand_to_screen(controlling_pos, self._state['center_pos'], shoulder_width)
         
         if screen_pos is None:
             return None
         
-        # Apply smoothing
-        last_pos = None
-        if self._state['last_cursor_x'] is not None and self._state['last_cursor_y'] is not None:
-            last_pos = (self._state['last_cursor_x'], self._state['last_cursor_y'])
-        
-        smooth_pos = self._smooth_position(screen_pos, last_pos)
-        self._state['last_cursor_x'] = smooth_pos[0]
-        self._state['last_cursor_y'] = smooth_pos[1]
-        
-        # Debug: Print cursor position
-        print(f"🖱️  [CURSOR] Moving to ({smooth_pos[0]}, {smooth_pos[1]})")
-        
-        # Check for pinch gesture (thumb + index finger)
+        # Check for pinch gesture (thumb + index finger) and freeze logic
         pinch_detected = False
+        pinch_distance = None
         
         # Decrement click cooldown
         if self._state['click_cooldown'] > 0:
@@ -309,40 +387,70 @@ class CursorControlDetector(BaseGestureDetector):
         if right_thumb_tip is not None and right_index_tip is not None:
             thumb_pos = tuple(right_thumb_tip)
             index_pos = tuple(right_index_tip)
-            
             pinch_distance = self._calculate_distance(thumb_pos, index_pos)
+        
+        # Determine if cursor should be frozen
+        cursor_should_freeze = False
+        if pinch_distance is not None and pinch_distance <= self.freeze_threshold:
+            cursor_should_freeze = True
+        
+        # Handle cursor freeze/unfreeze transitions
+        if cursor_should_freeze and not self._state['cursor_frozen']:
+            # Entering freeze state - save current cursor position
+            self._state['cursor_frozen'] = True
+            self._state['frozen_cursor_x'] = self._state['last_cursor_x']
+            self._state['frozen_cursor_y'] = self._state['last_cursor_y']
+        elif not cursor_should_freeze and self._state['cursor_frozen']:
+            # Exiting freeze state - resume normal cursor tracking
+            self._state['cursor_frozen'] = False
+            self._state['frozen_cursor_x'] = None
+            self._state['frozen_cursor_y'] = None
+        
+        # Determine final cursor position
+        if self._state['cursor_frozen']:
+            # Use frozen position
+            final_x = self._state['frozen_cursor_x']
+            final_y = self._state['frozen_cursor_y']
+        else:
+            # Apply smoothing and update cursor position normally
+            last_pos = None
+            if self._state['last_cursor_x'] is not None and self._state['last_cursor_y'] is not None:
+                last_pos = (self._state['last_cursor_x'], self._state['last_cursor_y'])
             
-            if pinch_distance is not None:
-                # State machine for pinch detection with hysteresis
-                current_state = "PINCHING" if self._state['is_pinching'] else "READY"
-                
-                if not self._state['is_pinching']:
-                    # Not currently pinching - check if we should start
-                    if pinch_distance <= self.pinch_threshold:
-                        if self._state['click_cooldown'] == 0:
-                            # Trigger click!
-                            self._state['is_pinching'] = True
-                            self._state['pinch_start_distance'] = pinch_distance
-                            pinch_detected = True
-                            self._state['click_cooldown'] = self.click_cooldown_frames
-                            print(f"✅ [CURSOR] CLICK TRIGGERED! distance: {pinch_distance:.4f} (threshold: {self.pinch_threshold:.4f})")
-                        else:
-                            print(f"⏳ [CURSOR] Pinch detected but in cooldown ({self._state['click_cooldown']} frames left)")
-                    else:
-                        # Print distance when not pinching (less verbose)
-                        if pinch_distance < self.pinch_threshold * 2:  # Only print when getting close
-                            print(f"� [CURSOR] {current_state} | distance: {pinch_distance:.4f} (need: ≤{self.pinch_threshold:.4f})")
-                else:
-                    # Currently pinching - check if we should release
-                    if pinch_distance > self.pinch_release_threshold:
-                        self._state['is_pinching'] = False
-                        self._state['pinch_start_distance'] = None
+            smooth_pos = self._smooth_position(screen_pos, last_pos)
+            self._state['last_cursor_x'] = smooth_pos[0]
+            self._state['last_cursor_y'] = smooth_pos[1]
+            final_x = smooth_pos[0]
+            final_y = smooth_pos[1]
+        
+        # Check for pinch click
+        if pinch_distance is not None:
+            if not self._state['is_pinching']:
+                # Not currently pinching - check if we should start
+                if pinch_distance <= self.pinch_threshold:
+                    if self._state['click_cooldown'] == 0:
+                        # Trigger click!
+                        self._state['is_pinching'] = True
+                        self._state['pinch_start_distance'] = pinch_distance
+                        pinch_detected = True
+                        self._state['click_cooldown'] = self.click_cooldown_frames
+                        # Unfreeze after click
+                        self._state['cursor_frozen'] = False
+                        self._state['frozen_cursor_x'] = None
+                        self._state['frozen_cursor_y'] = None
+            else:
+                # Currently pinching - check if we should release
+                if pinch_distance > self.pinch_release_threshold:
+                    self._state['is_pinching'] = False
+                    self._state['pinch_start_distance'] = None
         
         # Return cursor control action
         result = {
             'action': 'cursor_move',
-            'x': smooth_pos[0],
-            'y': smooth_pos[1],
+            'x': final_x,
+            'y': final_y,
+            'pinch_distance': pinch_distance,
+            'cursor_frozen': self._state['cursor_frozen'],
         }
         
         # Add click action if pinch just occurred
@@ -362,4 +470,7 @@ class CursorControlDetector(BaseGestureDetector):
             'shoulder_width': None,
             'click_cooldown': 0,
             'pinch_start_distance': None,
+            'cursor_frozen': False,
+            'frozen_cursor_x': None,
+            'frozen_cursor_y': None,
         }

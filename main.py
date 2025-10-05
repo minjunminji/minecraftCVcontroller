@@ -171,6 +171,48 @@ def main():
                         'thickness': 2
                     })
                     y_pos += 30
+
+                    # Show cursor coordinates from cursor_control (if available)
+                    cursor_result = gesture_results.get('cursor_control')
+                    if isinstance(cursor_result, dict):
+                        cx = cursor_result.get('x')
+                        cy = cursor_result.get('y')
+                        cursor_frozen = cursor_result.get('cursor_frozen', False)
+                        
+                        if cx is not None and cy is not None:
+                            # Color code cursor position based on freeze state
+                            cursor_color = (255, 128, 0) if cursor_frozen else (0, 255, 255)
+                            cursor_text = f"Cursor: ({int(cx)}, {int(cy)})"
+                            if cursor_frozen:
+                                cursor_text += " [FROZEN]"
+                            overlay_texts.append({
+                                'text': cursor_text,
+                                'position': (left_x, y_pos),
+                                'scale': 0.5,
+                                'color': cursor_color,
+                                'thickness': 1
+                            })
+                            y_pos += 25
+                        
+                        # Show pinch distance
+                        pinch_dist = cursor_result.get('pinch_distance')
+                        if pinch_dist is not None:
+                            # Color code based on thresholds (0.06 = pinch trigger, 0.10 = freeze)
+                            if pinch_dist <= 0.06:
+                                dist_color = (0, 255, 0)  # Green = click zone
+                            elif pinch_dist <= 0.10:
+                                dist_color = (255, 128, 0)  # Orange = freeze zone
+                            else:
+                                dist_color = (255, 255, 255)  # White = normal
+                            
+                            overlay_texts.append({
+                                'text': f"Pinch: {pinch_dist:.4f} (click: 0.06, freeze: 0.10)",
+                                'position': (left_x, y_pos),
+                                'scale': 0.5,
+                                'color': dist_color,
+                                'thickness': 1
+                            })
+                            y_pos += 25
                     
                     if gesture_results:
                         for gesture_name, gesture_data in gesture_results.items():
