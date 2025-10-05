@@ -4,6 +4,7 @@ Keyboard and Mouse controller for game input
 
 import platform
 import time
+from collections import deque
 
 # Try to import pynput for cross-platform support
 try:
@@ -32,6 +33,11 @@ class GameController:
         # Track currently pressed keys and buttons
         self.pressed_keys = set()
         self.pressed_buttons = set()
+        
+        # Track recent one-time actions (for debug display)
+        # Format: (timestamp, action_type, action_name)
+        self.recent_actions = deque(maxlen=10)
+        self.action_display_duration = 0.5  # Show actions for 0.5 seconds
         
         # Key mapping (Minecraft standard controls)
         self.key_map = {
@@ -101,6 +107,8 @@ class GameController:
         self.press_key(key_name)
         time.sleep(duration)
         self.release_key(key_name)
+        # Track this one-time action
+        self.recent_actions.append((time.time(), 'tap', key_name.upper()))
     
     def press_mouse(self, button_name='left'):
         """
@@ -147,6 +155,8 @@ class GameController:
         button = self.button_map.get(button_name, Button.left)
         try:
             self.mouse.click(button, count)
+            # Track this one-time action
+            self.recent_actions.append((time.time(), 'click', f"{button_name.upper()} MOUSE"))
         except Exception as e:
             print(f"Error clicking mouse button {button_name}: {e}")
     
@@ -173,6 +183,9 @@ class GameController:
         """
         try:
             self.mouse.scroll(dx, dy)
+            # Track this one-time action
+            direction = "UP" if dy > 0 else "DOWN" if dy < 0 else "LEFT" if dx < 0 else "RIGHT"
+            self.recent_actions.append((time.time(), 'scroll', f"SCROLL {direction}"))
         except Exception as e:
             print(f"Error scrolling mouse: {e}")
     
@@ -201,6 +214,21 @@ class GameController:
     def get_pressed_buttons(self):
         """Get list of currently pressed mouse buttons."""
         return list(self.pressed_buttons)
+    
+    def get_recent_actions(self):
+        """
+        Get list of recent one-time actions (clicks, taps, scrolls).
+        Filters out actions older than action_display_duration.
+        
+        Returns:
+            List of (action_type, action_name) tuples for recent actions
+        """
+        current_time = time.time()
+        recent = []
+        for timestamp, action_type, action_name in self.recent_actions:
+            if current_time - timestamp <= self.action_display_duration:
+                recent.append((action_type, action_name))
+        return recent
 
 
 class MinecraftController(GameController):
@@ -254,27 +282,27 @@ class MinecraftController(GameController):
         """Stop sneaking."""
         self.release_key('shift')
     
-    def attack(self):
+    def single_left_click(self):
         """Single attack (left click)."""
         self.click_mouse('left')
     
-    def start_mining(self):
+    def hold_left_click(self):
         """Start mining/breaking (hold left click)."""
         self.press_mouse('left')
     
-    def stop_mining(self):
+    def release_left_click(self):
         """Stop mining/breaking (release left click)."""
         self.release_mouse('left')
     
-    def use_item(self):
+    def single_right_click(self):
         """Use item (right click)."""
         self.click_mouse('right')
     
-    def start_using_item(self):
+    def hold_right_click(self):
         """Start using item continuously (hold right click)."""
         self.press_mouse('right')
     
-    def stop_using_item(self):
+    def release_right_click(self):
         """Stop using item (release right click)."""
         self.release_mouse('right')
     

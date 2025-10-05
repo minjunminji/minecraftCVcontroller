@@ -41,7 +41,7 @@ def main():
     # Initialize webcam
     # webcam 0 = iphone continuity camera
     # webcam 1 = mac camera
-    cap = cv2.VideoCapture(2)
+    cap = cv2.VideoCapture(1)
     
     if not cap.isOpened():
         print("Error: Could not open webcam.")
@@ -73,8 +73,8 @@ def main():
     gesture_detectors = {
         'shield': ShieldDetector(),      # Left hand: shield block
         'inventory': InventoryDetector(), # Left hand: inventory open
-        'mining': MiningDetector(),      # FIXME: Right hand: mining / attacking
-        'placing': PlacingDetector(),    # TODO: Right hand: placing / using items
+        'mining': MiningDetector(),      # Right hand: mining / attacking
+        'placing': PlacingDetector(),    # Right hand: placing / using items
         'movement': MovementDetector(),  # TODO: Locomotion
     }
     enabled_count = sum(1 for detector in gesture_detectors.values() if detector.is_enabled())
@@ -133,7 +133,7 @@ def main():
                         break
                 
                 # Map right hand gestures (priority order)
-                right_hand_priority = ['mining', 'placing']
+                right_hand_priority = ['placing', 'mining']
                 for gesture_name in right_hand_priority:
                     if gesture_name in gesture_results:
                         gesture_payload = gesture_results[gesture_name]
@@ -212,12 +212,13 @@ def main():
                     })
                     y_pos += 30
                     
-                    # Show what's actually being pressed
+                    # Show what's actually being pressed (held)
                     pressed_keys = action_status.get('pressed_keys', [])
                     pressed_buttons = action_status.get('pressed_buttons', [])
-                    
+                    recent_actions = action_status.get('recent_actions', [])
+
                     if pressed_keys:
-                        keys_text = f"Keys: {', '.join([str(k).upper() for k in pressed_keys])}"
+                        keys_text = f"Held Keys: {', '.join([str(k).upper() for k in pressed_keys])}"
                         overlay_texts.append({
                             'text': keys_text,
                             'position': (left_x, y_pos),
@@ -226,9 +227,9 @@ def main():
                             'thickness': 1
                         })
                         y_pos += 25
-                    
+
                     if pressed_buttons:
-                        buttons_text = f"Mouse: {', '.join([b.upper() for b in pressed_buttons])}"
+                        buttons_text = f"Held Mouse: {', '.join([b.upper() for b in pressed_buttons])}"
                         overlay_texts.append({
                             'text': buttons_text,
                             'position': (left_x, y_pos),
@@ -237,8 +238,31 @@ def main():
                             'thickness': 1
                         })
                         y_pos += 25
-                    
-                    if not pressed_keys and not pressed_buttons:
+
+                    # Show recent one-time actions (clicks, taps, scrolls)
+                    if recent_actions:
+                        for action_type, action_name in recent_actions:
+                            action_text = f"{action_type.capitalize()}: {action_name}"
+                            # Different colors for different action types
+                            if action_type == 'click':
+                                color = (255, 128, 0)  # Orange for clicks
+                            elif action_type == 'tap':
+                                color = (128, 255, 128)  # Light green for taps
+                            elif action_type == 'scroll':
+                                color = (255, 255, 128)  # Yellow for scrolls
+                            else:
+                                color = (200, 200, 200)  # Gray for others
+                            
+                            overlay_texts.append({
+                                'text': action_text,
+                                'position': (left_x, y_pos),
+                                'scale': 0.5,
+                                'color': color,
+                                'thickness': 1
+                            })
+                            y_pos += 25
+
+                    if not pressed_keys and not pressed_buttons and not recent_actions:
                         overlay_texts.append({
                             'text': "None",
                             'position': (left_x, y_pos),
