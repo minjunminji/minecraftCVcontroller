@@ -1,7 +1,13 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+controls/__pycache__/
+cv/__pycache__/
+gestures/__pycache__/
+utils/__pycache__/
 *.py[cod]
 *$py.class
+
+CURSOR_CONTROL_IMPLEMENTATION.md
 
 # C extensions
 *.so
