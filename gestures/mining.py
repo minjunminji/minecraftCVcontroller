@@ -1,5 +1,5 @@
 """
-Mining gesture detector - detects mining/attacking motions
+Mining gesture detector - detects vertical stabbing motions for continuous mining
 """
 
 import time
@@ -9,53 +9,58 @@ from gestures.base_detector import BaseGestureDetector
 
 class MiningDetector(BaseGestureDetector):
     """
-    Detects mining/attacking gestures based on right arm velocity.
+    Detects mining gestures based on vertical right wrist velocity.
     
     Logic:
-    - Detected by spike in velocity of the right arm
-    - Sends one left click
-    - If movement is oscillatory / keeps happening (like a continuous mining motion)
-    - Switches to holding down left-click until oscillating stops
+    - Triggered by spike in y-axis velocity on right wrist (vertical stabbing)
+    - X-axis velocity must remain low (vertical movement only)
+    - Velocity normalized to shoulder width for scale-invariance
+    - Holds down left click while vertical motion continues
+    - Uses hand spread detection to distinguish mining (closed fist) from placing (open hand)
     """
     
     def __init__(self):
         super().__init__("mining")
         
-        # Configuration
-        self.velocity_threshold = 0.4  # Minimum overall velocity to consider an attack
-        self.click_interval = 0.6      # Max time between classified clicks
-        self.oscillation_threshold = 0.07  # Threshold for oscillation detection when holding
-        self.directional_velocity_threshold = 0.25  # Minimum velocity along forearm axis
-        self.min_direction_changes_for_hold = 2      # Direction reversals before entering hold
-        self.hold_oscillation_window = 1.2           # Time window to observe oscillations
-        self.sequence_reset_timeout = 1.5            # Timeout for streak tracking
-        self.single_click_cooldown = 0.25            # Minimum time between single clicks
-        self.hold_grace_period = 0.35                # Grace period to maintain hold without spikes
-        self.open_hand_area_threshold = 0.55         # Above this normalized area, treat hand as open (placing)
-        self.closed_hand_area_threshold = 0.45       # Below this normalized area, treat hand as closed (mining)
+        # ==================== ADJUSTABLE CONFIGURATION ====================
+        # All velocity values are normalized to shoulder width for scale-invariance
+        
+        # Y-axis velocity threshold: Higher = requires faster vertical stabbing
+        # Default: 1.3 (increase to 1.8 for more aggressive stabs only)
+        self.y_velocity_threshold = 1.3
+        
+        # X-axis velocity threshold: Lower = requires more strictly vertical movement
+        # Default: 0.8 (decrease to 0.5-0.6 to avoid false triggers from horizontal movement)
+        self.x_velocity_threshold = 0.8
+        
+        # Velocity averaging window: Number of frames to calculate average velocity
+        # Default: 6 frames (increase to 7-10 for smoother, less sensitive detection)
+        self.velocity_window_frames = 6
+        
+        # Grace period: Time to maintain hold without vertical motion
+        # Default: 0.26 seconds (increase to 0.6 for more forgiving detection)
+        self.hold_grace_period = 0.25
+        
+        # Hand spread thresholds for distinguishing mining vs placing
+        self.open_hand_area_threshold = 0.55    # Above this = open hand (placing)
+        self.closed_hand_area_threshold = 0.45  # Below this = closed fist (mining)
+        # ==================================================================
         
         # State tracking
         self._state = {
-            'is_holding': False,
-            'click_count': 0,
-            'last_click_time': None,
-            'last_velocity': 0,
-            'last_direction': None,
-            'direction_change_count': 0,
-            'sequence_start_time': None,
-            'last_spike_time': None,
+            'is_holding': False,           # Whether currently holding left click
+            'last_motion_time': None,      # Time of last detected vertical motion
         }
     
     def detect(self, state_manager):
         """
-        Detect mining gesture from right arm velocity patterns.
+        Detect mining gesture from right wrist vertical velocity.
         
         Args:
             state_manager: GestureStateManager instance
         
         Returns:
             Dictionary with action type or None:
-            - {'action': 'mining_click'} - Single attack click
             - {'action': 'mining_start_hold'} - Start continuous mining
             - {'action': 'mining_continue_hold'} - Continue holding
             - {'action': 'mining_stop_hold'} - Stop mining
@@ -64,130 +69,80 @@ class MiningDetector(BaseGestureDetector):
         if not self.enabled:
             return None
         
-        velocity_vector = state_manager.get_velocity('right_wrist', window_size=3)
+        # Get velocity of right wrist
+        velocity_vector = state_manager.get_velocity(
+            'right_wrist',
+            window_size=self.velocity_window_frames
+        )
         
         if velocity_vector is None:
             return self._handle_tracking_lost()
         
+        # Check hand spread to distinguish mining (closed fist) from placing (open hand)
         hand_spread = self._get_hand_spread_area(state_manager)
         hand_is_open = False
-        hand_is_closed = False
         if hand_spread is not None:
             hand_is_open = hand_spread >= self.open_hand_area_threshold
-            hand_is_closed = hand_spread <= self.closed_hand_area_threshold
-        velocity = float(np.linalg.norm(velocity_vector))
-        self._state['last_velocity'] = velocity
-        current_time = time.time()
         
-        directional_velocity = self._compute_directional_velocity(state_manager, velocity_vector)
-        direction = 0
-        if directional_velocity > self.directional_velocity_threshold:
-            direction = 1
-        elif directional_velocity < -self.directional_velocity_threshold:
-            direction = -1
-        
-        velocity_spike = velocity > self.velocity_threshold and direction != 0
-        
+        # If hand is open and we're holding, stop mining
         if self._state['is_holding'] and hand_is_open:
             self._state['is_holding'] = False
-            self._reset_direction_tracking()
-            self._state['click_count'] = 0
-            self._state['last_click_time'] = None
-            self._state['last_spike_time'] = None
+            self._state['last_motion_time'] = None
             return {'action': 'mining_stop_hold'}
         
-        if velocity_spike and (hand_is_open or not hand_is_closed):
-            self._reset_direction_tracking()
-            self._state['last_spike_time'] = current_time
-            self._state['last_velocity'] = velocity
+        # Ignore if hand is open (this is placing gesture, not mining)
+        if hand_is_open:
             return None
         
-        if velocity_spike:
-            last_spike_time = self._state['last_spike_time']
+        # Get shoulder distance for normalization
+        shoulder_distance = self._get_shoulder_distance(state_manager)
+        
+        if shoulder_distance is None or shoulder_distance < 1e-5:
+            return None
+        
+        # Normalize velocity by shoulder distance for scale-invariance
+        normalized_velocity = velocity_vector / shoulder_distance
+        
+        # Extract x and y components
+        x_velocity = abs(normalized_velocity[0])  # Absolute x-axis speed
+        y_velocity = abs(normalized_velocity[1])  # Absolute y-axis speed
+        
+        # Check if movement is primarily vertical and fast enough
+        is_vertical_stab = (
+            y_velocity > self.y_velocity_threshold and
+            x_velocity < self.x_velocity_threshold
+        )
+        
+        current_time = time.time()
+        
+        if is_vertical_stab:
+            # Vertical stabbing motion detected
+            self._state['last_motion_time'] = current_time
             
-            if last_spike_time is None:
-                self._state['sequence_start_time'] = current_time
-            else:
-                time_since_last_spike = current_time - last_spike_time
-                
-                if time_since_last_spike > self.sequence_reset_timeout:
-                    self._reset_direction_tracking()
-                    self._state['sequence_start_time'] = current_time
-                elif (
-                    self._state['sequence_start_time'] is not None and
-                    current_time - self._state['sequence_start_time'] > self.hold_oscillation_window
-                ):
-                    self._reset_direction_tracking()
-                    self._state['sequence_start_time'] = current_time
-            
-            self._state['last_spike_time'] = current_time
-            
-            if self._state['last_direction'] is None:
-                self._state['last_direction'] = direction
-            elif direction != self._state['last_direction']:
-                self._state['direction_change_count'] += 1
-                self._state['last_direction'] = direction
-            
-            if self._state['is_holding']:
-                return {'action': 'mining_continue_hold'}
-            
-            sequence_start = self._state['sequence_start_time'] or current_time
-            if (
-                self._state['direction_change_count'] >= self.min_direction_changes_for_hold and
-                current_time - sequence_start <= self.hold_oscillation_window
-            ):
+            if not self._state['is_holding']:
+                # Start holding
                 self._state['is_holding'] = True
-                self._state['click_count'] = 0
-                self._state['last_click_time'] = current_time
-                self._reset_direction_tracking()
-                self._state['last_spike_time'] = current_time
                 return {'action': 'mining_start_hold'}
-            
-            if direction > 0:
-                last_click_time = self._state['last_click_time']
-                time_since_click = None if last_click_time is None else current_time - last_click_time
-                
-                if last_click_time is None or time_since_click >= self.single_click_cooldown:
-                    self._state['last_click_time'] = current_time
-                    self._state['click_count'] = 1
-                    return {'action': 'mining_click'}
-            
-            return None
-        
-        if self._state['is_holding']:
-            if (
-                self._state['last_spike_time'] is not None and
-                current_time - self._state['last_spike_time'] <= self.hold_grace_period
-            ):
+            else:
+                # Continue holding
                 return {'action': 'mining_continue_hold'}
-            
-            is_oscillating = state_manager.is_oscillating(
-                'right_wrist',
-                threshold=self.oscillation_threshold,
-                window_size=15,
-                min_peaks=2
-            )
-            
-            if not is_oscillating:
-                self._state['is_holding'] = False
-                self._state['click_count'] = 0
-                self._state['last_click_time'] = None
-                self._reset_direction_tracking()
-                return {'action': 'mining_stop_hold'}
-            
-            return {'action': 'mining_continue_hold'}
         
-        if self._state['last_click_time']:
-            time_since_last_click = current_time - self._state['last_click_time']
-            if time_since_last_click > self.click_interval * 2:
-                self._state['click_count'] = 0
-                self._state['last_click_time'] = None
-        
-        if (
-            self._state['last_spike_time'] and
-            current_time - self._state['last_spike_time'] > self.sequence_reset_timeout
-        ):
-            self._reset_direction_tracking()
+        # No vertical motion detected
+        if self._state['is_holding']:
+            # Check if we should stop holding (grace period expired)
+            last_motion_time = self._state['last_motion_time']
+            
+            if last_motion_time is not None:
+                time_since_motion = current_time - last_motion_time
+                
+                if time_since_motion <= self.hold_grace_period:
+                    # Still within grace period, continue holding
+                    return {'action': 'mining_continue_hold'}
+            
+            # Grace period expired, stop holding
+            self._state['is_holding'] = False
+            self._state['last_motion_time'] = None
+            return {'action': 'mining_stop_hold'}
         
         return None
     
@@ -252,53 +207,38 @@ class MiningDetector(BaseGestureDetector):
         
         return float(np.median(distances))
     
-    def _compute_directional_velocity(self, state_manager, velocity_vector):
-        """Project wrist velocity onto the forearm axis to obtain signed magnitude."""
-        if velocity_vector is None:
-            return 0.0
+    def _get_shoulder_distance(self, state_manager):
+        """
+        Calculate the distance between the two shoulders (landmarks 11 and 12).
+        This is used to normalize velocities for scale-invariance.
         
-        elbow_pos = state_manager.get_landmark_position('right_elbow')
-        wrist_pos = state_manager.get_landmark_position('right_wrist')
+        Args:
+            state_manager: GestureStateManager instance
         
-        if elbow_pos is not None and wrist_pos is not None:
-            axis = wrist_pos - elbow_pos
-            axis_norm = np.linalg.norm(axis)
-            if axis_norm > 1e-5:
-                return float(np.dot(velocity_vector, axis) / axis_norm)
+        Returns:
+            float: Distance between shoulders, or None if landmarks not available
+        """
+        # Pose landmarks 11 = left shoulder, 12 = right shoulder
+        left_shoulder = state_manager.get_landmark_position('left_shoulder')
+        right_shoulder = state_manager.get_landmark_position('right_shoulder')
         
-        dominant_axis = int(np.argmax(np.abs(velocity_vector)))
-        return float(velocity_vector[dominant_axis])
-    
-    def _reset_direction_tracking(self):
-        """Clear oscillation tracking state."""
-        self._state['last_direction'] = None
-        self._state['direction_change_count'] = 0
-        self._state['sequence_start_time'] = None
-        self._state['last_spike_time'] = None
+        if left_shoulder is None or right_shoulder is None:
+            return None
+        
+        return float(np.linalg.norm(right_shoulder - left_shoulder))
     
     def _handle_tracking_lost(self):
         """Handle loss of tracking information."""
-        stop_action = None
         if self._state['is_holding']:
             self._state['is_holding'] = False
-            stop_action = {'action': 'mining_stop_hold'}
+            self._state['last_motion_time'] = None
+            return {'action': 'mining_stop_hold'}
         
-        self._reset_direction_tracking()
-        self._state['click_count'] = 0
-        self._state['last_click_time'] = None
-        self._state['last_velocity'] = 0
-        
-        return stop_action
+        return None
      
     def reset(self):
         """Reset mining detector state."""
         self._state = {
             'is_holding': False,
-            'click_count': 0,
-            'last_click_time': None,
-            'last_velocity': 0,
-            'last_direction': None,
-            'direction_change_count': 0,
-            'sequence_start_time': None,
-            'last_spike_time': None,
+            'last_motion_time': None,
         }
