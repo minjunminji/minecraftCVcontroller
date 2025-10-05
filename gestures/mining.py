@@ -17,6 +17,7 @@ class MiningDetector(BaseGestureDetector):
     - Velocity normalized to shoulder width for scale-invariance
     - Holds down left click while vertical motion continues
     - Uses hand spread detection to distinguish mining (closed fist) from placing (open hand)
+    - Gated: right wrist must be above right shoulder for any mining detection/hold
     """
     
     def __init__(self):
@@ -68,7 +69,24 @@ class MiningDetector(BaseGestureDetector):
         """
         if not self.enabled:
             return None
-        
+
+        # Gate: require right wrist above right shoulder to listen for mining
+        right_wrist_pos = state_manager.get_landmark_position('right_wrist')
+        right_shoulder_pos = state_manager.get_landmark_position('right_shoulder')
+
+        if right_wrist_pos is None or right_shoulder_pos is None:
+            return self._handle_tracking_lost()
+
+        wrist_above_shoulder = float(right_wrist_pos[1]) < float(right_shoulder_pos[1])
+
+        if not wrist_above_shoulder:
+            # If we were holding, stop immediately; otherwise, ignore gesture
+            if self._state['is_holding']:
+                self._state['is_holding'] = False
+                self._state['last_motion_time'] = None
+                return {'action': 'mining_stop_hold'}
+            return None
+
         # Get velocity of right wrist
         velocity_vector = state_manager.get_velocity(
             'right_wrist',
