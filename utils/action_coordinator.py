@@ -144,9 +144,8 @@ class ActionCoordinator:
         
         action_type = left_hand.get('action')
         
-        # Menu close gesture (only active in menu mode)
+        # Menu close gesture (opposite of inventory open)
         if action_type == 'menu_close':
-            # Silently ignore in gameplay mode to prevent accidental ESC
             if self.current_mode == 'menu':
                 self._exit_menu_mode()
             return
@@ -267,32 +266,15 @@ class ActionCoordinator:
             self._exit_menu_mode()
     
     def _execute_menu_actions(self, gesture_results, state_manager):
-        """
-        Execute actions during menu mode.
-        In menu mode, ONLY these gestures are active:
-        1. Swipe left (from left hand) - exits menu mode via ESC
-        2. Cursor control - for navigating menus
-        All other gestures are disabled.
-        """
+        """Execute actions during menu mode."""
         _ = state_manager  # Placeholder for future expansions
         
-        # Check mode switches first (cursor lock/unlock detection)
+        # Allow mode switches (e.g., cursor lock/unlock) to modify state while in menu
         self._handle_mode_switches(gesture_results)
-        
-        # Early return if mode switched to gameplay
         if self.current_mode != 'menu':
             return
         
-        # GESTURE 1: Handle swipe left to exit menu mode
-        left_hand = gesture_results.get('left_hand')
-        if left_hand:
-            action_type = left_hand.get('action')
-            if action_type == 'menu_swipe_left':
-                self._exit_menu_mode()
-                return
-            # All other left hand actions are ignored in menu mode
-        
-        # GESTURE 2: Handle cursor control for menu navigation
+        # Handle cursor control for menu navigation
         cursor_control = gesture_results.get('cursor_control')
         if cursor_control:
             action = cursor_control.get('action')
@@ -308,8 +290,22 @@ class ActionCoordinator:
                 if cursor_control.get('click'):
                     self.controller.click_mouse('left')
         
-        # All other gestures (movement, jumping, attack, mining, placing, 
-        # shield, head look, right hand) are completely ignored in menu mode
+        left_hand = gesture_results.get('left_hand')
+        if left_hand:
+            menu_hand_action = left_hand.get('action')
+            if menu_hand_action == 'menu_swipe_left':
+                self._exit_menu_mode()
+                return
+            elif menu_hand_action == 'menu_swipe_right':
+                # Maintain menu state without re-sending inventory toggle
+                self._enter_menu_mode(open_inventory=False)
+        
+        menu_action = gesture_results.get('menu_action')
+        
+        if menu_action == 'select':
+            self.controller.click_mouse('left')
+        elif menu_action == 'back':
+            self._exit_menu_mode()
     
     def _enter_menu_mode(self, open_inventory=True):
         """Switch to menu mode."""
