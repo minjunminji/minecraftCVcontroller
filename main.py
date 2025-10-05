@@ -41,7 +41,7 @@ def main():
     # Initialize webcam
     # webcam 0 = iphone continuity camera
     # webcam 1 = mac camera
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(2)
     
     if not cap.isOpened():
         print("Error: Could not open webcam.")
@@ -338,7 +338,7 @@ def main():
         print("\nCleaning up...")
         
         # Release all game controls
-        action_coordinator.cleanup()
+        action_coordinator.reset()
         print("✓ Released all game controls")
         
         # Release webcam
