@@ -84,10 +84,12 @@ class CursorControlDetector(BaseGestureDetector):
     def __init__(self):
         super().__init__("cursor_control")
         
-        # Configuration
-        self.pinch_threshold = 0.06  # Distance threshold for pinch detection (in normalized coords) - SMALLER = more sensitive
-        self.pinch_release_threshold = 0.06  # Distance to release pinch (add hysteresis)
-        self.freeze_threshold = 0.10  # Distance to freeze cursor movement (preparing for click)
+        # Configuration (thresholds are SHOULDER-WIDTH NORMALIZED)
+        # All pinch distances are divided by shoulder width (pose 11-12)
+        # so behavior remains consistent regardless of distance to camera.
+        self.pinch_threshold = 0.06  # Normalized distance to start pinch (smaller = must be closer)
+        self.pinch_release_threshold = 0.06  # Normalized distance to release pinch (hysteresis)
+        self.freeze_threshold = 0.10  # Normalized distance to freeze cursor movement when preparing to click
         self.smoothing_factor = 0.7  # Smoothing for cursor movement (0=no smooth, 1=full smooth) - HIGHER = more responsive
         self.sensitivity_multiplier = 1.0  # Movement sensitivity (shoulder width = full screen when 1.0)
         self.click_cooldown_frames = 15  # Minimum frames between clicks (prevents double-click at 30fps)
@@ -388,6 +390,7 @@ class CursorControlDetector(BaseGestureDetector):
         # Check for pinch gesture (thumb + index finger) and freeze logic
         pinch_detected = False
         pinch_distance = None
+        pinch_distance_normalized = None
         
         # Decrement click cooldown
         if self._state['click_cooldown'] > 0:
@@ -397,10 +400,19 @@ class CursorControlDetector(BaseGestureDetector):
             thumb_pos = tuple(right_thumb_tip)
             index_pos = tuple(right_index_tip)
             pinch_distance = self._calculate_distance(thumb_pos, index_pos)
+            # Normalize pinch distance by current shoulder width for scale invariance
+            if shoulder_width is not None and shoulder_width > 1e-6 and pinch_distance is not None:
+                pinch_distance_normalized = pinch_distance / float(shoulder_width)
         
         # Determine if cursor should be frozen
         cursor_should_freeze = False
-        if pinch_distance is not None and pinch_distance <= self.freeze_threshold:
+        # Compare using shoulder-normalized distance when available
+        pinch_for_compare = (
+            pinch_distance_normalized
+            if pinch_distance_normalized is not None
+            else pinch_distance
+        )
+        if pinch_for_compare is not None and pinch_for_compare <= self.freeze_threshold:
             cursor_should_freeze = True
         
         # Handle cursor freeze/unfreeze transitions
@@ -433,14 +445,19 @@ class CursorControlDetector(BaseGestureDetector):
             final_y = smooth_pos[1]
         
         # Check for pinch click
-        if pinch_distance is not None:
+        if pinch_for_compare is not None:
             if not self._state['is_pinching']:
                 # Not currently pinching - check if we should start
-                if pinch_distance <= self.pinch_threshold:
+                if pinch_for_compare <= self.pinch_threshold:
                     if self._state['click_cooldown'] == 0:
                         # Trigger click!
                         self._state['is_pinching'] = True
-                        self._state['pinch_start_distance'] = pinch_distance
+                        # Store normalized distance if available for debug/telemetry
+                        self._state['pinch_start_distance'] = (
+                            pinch_distance_normalized
+                            if pinch_distance_normalized is not None
+                            else pinch_distance
+                        )
                         pinch_detected = True
                         self._state['click_cooldown'] = self.click_cooldown_frames
                         # Unfreeze after click
@@ -449,7 +466,7 @@ class CursorControlDetector(BaseGestureDetector):
                         self._state['frozen_cursor_y'] = None
             else:
                 # Currently pinching - check if we should release
-                if pinch_distance > self.pinch_release_threshold:
+                if pinch_for_compare > self.pinch_release_threshold:
                     self._state['is_pinching'] = False
                     self._state['pinch_start_distance'] = None
         
@@ -459,6 +476,9 @@ class CursorControlDetector(BaseGestureDetector):
             'x': final_x,
             'y': final_y,
             'pinch_distance': pinch_distance,
+            'pinch_distance_normalized': pinch_distance_normalized
+                if pinch_distance_normalized is not None
+                else (pinch_distance if pinch_distance is not None else None),
             'cursor_frozen': self._state['cursor_frozen'],
         }
         

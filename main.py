@@ -21,6 +21,7 @@ from gestures.inventory import InventoryDetector
 from gestures.menuclose import MenuCloseDetector
 from gestures.cursor_control import CursorControlDetector
 from gestures.attack import AttackDetector
+from gestures.looking import LookingDetector
 
 
 def main():
@@ -82,6 +83,7 @@ def main():
         'mining': MiningDetector(),         # Right hand: mining / continuous attacking
         'placing': PlacingDetector(),       # Right hand: placing / using items
         'movement': MovementDetector(),     # Locomotion
+        'looking': LookingDetector(),       # Head rotation: mouse control (looking around)
     }
     enabled_count = sum(1 for detector in gesture_detectors.values() if detector.is_enabled())
     print(f"✓ {enabled_count} gesture detector(s) enabled / {len(gesture_detectors)} total initialized")
@@ -169,6 +171,10 @@ def main():
                         else:
                             gesture_results['right_hand'] = {'action': gesture_payload, 'source': gesture_name}
                         break
+                
+                # Map looking gesture to head_look for action coordinator
+                if 'looking' in gesture_results:
+                    gesture_results['head_look'] = gesture_results['looking']
                 
                 # === STEP 4: Execute actions via coordinator ===
                 try:
@@ -281,10 +287,75 @@ def main():
                             })
                             y_pos += 25
                     
+                    # Show looking gesture debug info (if available)
+                    looking_result = gesture_results.get('looking')
+                    if isinstance(looking_result, dict):
+                        left_x_dist = looking_result.get('left_x_distance')
+                        right_x_dist = looking_result.get('right_x_distance')
+                        left_y_dist = looking_result.get('left_y_distance')
+                        right_y_dist = looking_result.get('right_y_distance')
+                        avg_y_dist = looking_result.get('avg_y_distance')
+                        x_ratio = looking_result.get('x_ratio')
+                        
+                        # Get detector settings for display
+                        looking_detector = gesture_detectors.get('looking')
+                        if looking_detector:
+                            tilt_mult = looking_detector.tilt_multiplier
+                            deadzone = looking_detector.deadzone
+                            y_thresh = looking_detector.y_threshold
+                            y_deadzone = looking_detector.y_deadzone
+                            
+                            # Color code based on whether tilting is active
+                            dx = looking_result.get('dx', 0)
+                            dy = looking_result.get('dy', 0)
+                            if dx != 0 or dy != 0:
+                                looking_color = (0, 255, 0)  # Green when active
+                            else:
+                                looking_color = (200, 200, 200)  # Gray when neutral
+                            
+                            # Show horizontal (left/right) info
+                            overlay_texts.append({
+                                'text': f"Looking L/R: X_L={left_x_dist:.4f} X_R={right_x_dist:.4f}",
+                                'position': (left_x, y_pos),
+                                'scale': 0.5,
+                                'color': looking_color,
+                                'thickness': 1
+                            })
+                            y_pos += 25
+                            
+                            overlay_texts.append({
+                                'text': f"  X Ratio: {x_ratio:.3f} (threshold: {tilt_mult:.2f}, deadzone: {deadzone:.2f})",
+                                'position': (left_x, y_pos),
+                                'scale': 0.5,
+                                'color': looking_color,
+                                'thickness': 1
+                            })
+                            y_pos += 25
+                            
+                            # Show vertical (up/down) info
+                            overlay_texts.append({
+                                'text': f"Looking U/D: Avg_Y={avg_y_dist:.4f} (- = up, + = down)",
+                                'position': (left_x, y_pos),
+                                'scale': 0.5,
+                                'color': looking_color,
+                                'thickness': 1
+                            })
+                            y_pos += 25
+                            
+                            overlay_texts.append({
+                                'text': f"  Up: Y < -{y_thresh:.3f}, Down: Y > 0, Deadzone={y_deadzone:.3f}",
+                                'position': (left_x, y_pos),
+                                'scale': 0.5,
+                                'color': looking_color,
+                                'thickness': 1
+                            })
+                            y_pos += 25
+                    
                     if gesture_results:
                         for gesture_name, gesture_data in gesture_results.items():
-                            # Skip the mapped results (left_hand, right_hand)
-                            if gesture_name in ['left_hand', 'right_hand']:
+                            # Skip the mapped results (left_hand, right_hand, looking, head_look)
+                            # looking is displayed separately above with detailed debug info
+                            if gesture_name in ['left_hand', 'right_hand', 'looking', 'head_look']:
                                 continue
                             
                             # Extract action info

@@ -170,6 +170,27 @@ def draw_landmarks(frame, landmarks_dict):
             landmark_drawing_spec=None,
             connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style()
         )
+        
+        # Highlight specific landmarks used for looking gesture
+        # These are the 4 key points used to detect head rotation
+        looking_landmarks = {
+            127: (0, 255, 0),    # Left face edge - GREEN
+            33: (0, 255, 255),   # Left eye outer canthus - CYAN
+            356: (255, 0, 0),    # Right face edge - BLUE
+            263: (255, 0, 255),  # Right eye outer canthus - MAGENTA
+        }
+        
+        h, w, _ = frame.shape
+        for idx, color in looking_landmarks.items():
+            if idx < len(results.face_landmarks.landmark):
+                lm = results.face_landmarks.landmark[idx]
+                x = int(lm.x * w)
+                y = int(lm.y * h)
+                # Draw a larger circle for these key points
+                cv2.circle(frame, (x, y), 8, color, -1)
+                # Add label with landmark number
+                cv2.putText(frame, str(idx), (x + 10, y - 10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
     
     return frame
 
