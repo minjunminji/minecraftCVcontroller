@@ -18,6 +18,7 @@ from gestures.mining import MiningDetector
 from gestures.placing import PlacingDetector
 from gestures.movement import MovementDetector
 from gestures.inventory import InventoryDetector
+from gestures.cursor_control import CursorControlDetector
 
 
 def main():
@@ -41,7 +42,7 @@ def main():
     # Initialize webcam
     # webcam 0 = iphone continuity camera
     # webcam 1 = mac camera
-    cap = cv2.VideoCapture(2)
+    cap = cv2.VideoCapture(0)
     
     if not cap.isOpened():
         print("Error: Could not open webcam.")
@@ -71,11 +72,12 @@ def main():
     
     # Initialize gesture detectors
     gesture_detectors = {
-        'shield': ShieldDetector(),      # Left hand: shield block
-        'inventory': InventoryDetector(), # Left hand: inventory open
-        'mining': MiningDetector(),      # FIXME: Right hand: mining / attacking
-        'placing': PlacingDetector(),    # TODO: Right hand: placing / using items
-        'movement': MovementDetector(),  # TODO: Locomotion
+        'shield': ShieldDetector(),         # Left hand: shield block
+        'inventory': InventoryDetector(),   # Left hand: inventory open
+        'cursor_control': CursorControlDetector(),  # Right hand: menu cursor control
+        'mining': MiningDetector(),         # FIXME: Right hand: mining / attacking
+        'placing': PlacingDetector(),       # TODO: Right hand: placing / using items
+        'movement': MovementDetector(),     # TODO: Locomotion
     }
     enabled_count = sum(1 for detector in gesture_detectors.values() if detector.is_enabled())
     print(f"✓ {enabled_count} gesture detector(s) enabled / {len(gesture_detectors)} total initialized")

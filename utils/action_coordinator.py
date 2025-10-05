@@ -263,6 +263,24 @@ class ActionCoordinator:
         if self.current_mode != 'menu':
             return
         
+        # Handle cursor control for menu navigation
+        cursor_control = gesture_results.get('cursor_control')
+        if cursor_control:
+            action = cursor_control.get('action')
+            
+            if action == 'cursor_move':
+                # Move cursor to absolute position
+                x = cursor_control.get('x')
+                y = cursor_control.get('y')
+                if x is not None and y is not None:
+                    print(f"🖱️  [ACTION_COORD] Setting cursor position to ({x}, {y})")
+                    self.controller.set_cursor_position(x, y)
+                
+                # Handle click if pinch detected
+                if cursor_control.get('click'):
+                    print(f"👆 [ACTION_COORD] Triggering left click!")
+                    self.controller.click_mouse('left')
+        
         left_hand = gesture_results.get('left_hand')
         if left_hand:
             menu_hand_action = left_hand.get('action')
