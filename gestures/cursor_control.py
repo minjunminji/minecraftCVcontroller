@@ -283,12 +283,14 @@ class CursorControlDetector(BaseGestureDetector):
         
         return (smooth_x, smooth_y)
     
-    def detect(self, state_manager):
+    def detect(self, state_manager, force_menu_mode=None):
         """
         Detect cursor control gestures from right hand.
         
         Args:
             state_manager: GestureStateManager instance
+            force_menu_mode: Optional boolean to override automatic menu detection
+                           (None = auto-detect, True = force on, False = force off)
         
         Returns:
             Dictionary with action type or None:
@@ -299,8 +301,15 @@ class CursorControlDetector(BaseGestureDetector):
         if not self.enabled:
             return None
         
-        # Only operate in menu mode
-        in_menu = is_in_menu_mode()
+        # Determine if we're in menu mode
+        if force_menu_mode is not None:
+            # Manual override
+            in_menu = force_menu_mode
+        else:
+            # Automatic detection (currently commented out)
+            # in_menu = is_in_menu_mode()
+            in_menu = False  # Default to off when not forced
+        
         if not in_menu:
             self._state['last_cursor_x'] = None
             self._state['last_cursor_y'] = None
