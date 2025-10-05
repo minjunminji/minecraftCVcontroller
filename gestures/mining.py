@@ -39,7 +39,7 @@ class MiningDetector(BaseGestureDetector):
         
         # Grace period: Time to maintain hold without vertical motion
         # Default: 0.26 seconds (increase to 0.6 for more forgiving detection)
-        self.hold_grace_period = 0.25
+        self.hold_grace_period = 0.5
         
         # Hand spread thresholds for distinguishing mining vs placing
         self.open_hand_area_threshold = 0.55    # Above this = open hand (placing)

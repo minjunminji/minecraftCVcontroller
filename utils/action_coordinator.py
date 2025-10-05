@@ -36,9 +36,13 @@ class ActionCoordinator:
         
         # Mode tracking
         self.current_mode = 'gameplay'  # 'gameplay', 'menu', 'inventory'
-        
+
         # Action history for debouncing
         self.last_action_time = {}
+        
+        # Scroll rate limiting (frames)
+        self.scroll_interval_frames = 6
+        self._scroll_frames_since = self.scroll_interval_frames
     
     def execute(self, gesture_results, state_manager):
         """
@@ -86,6 +90,7 @@ class ActionCoordinator:
             filtered_results.pop('shield', None)
             filtered_results.pop('inventory', None)
             filtered_results.pop('menuclose', None)
+            filtered_results.pop('hand_scroll', None)
 
         right_wrist = state_manager.get_landmark_position('right_wrist')
         if not wrist_above_threshold(right_wrist):
@@ -116,12 +121,36 @@ class ActionCoordinator:
         
         # 4. Handle right hand actions (placing, using items, attacking)
         self._handle_right_hand_actions(gesture_results)
+
+        # 5. Handle scroll from left hand rotation
+        self._handle_hand_scroll(gesture_results)
         
-        # 5. Handle head look (mouse movement)
+        # 6. Handle head look (mouse movement)
         self._handle_head_look(gesture_results)
         
-        # 6. Handle mode switches
+        # 7. Handle mode switches
         self._handle_mode_switches(gesture_results)
+
+    def _handle_hand_scroll(self, gesture_results):
+        """Handle scroll wheel actions from hand scroll detector."""
+        scroll_result = gesture_results.get('hand_scroll')
+        if not scroll_result:
+            return
+
+        direction = scroll_result.get('scrolling')
+        # Advance cooldown counter
+        self._scroll_frames_since = min(self._scroll_frames_since + 1, self.scroll_interval_frames)
+
+        if direction == 'up':
+            # Hotbar next slot (rate-limited)
+            if self._scroll_frames_since >= self.scroll_interval_frames:
+                self.controller.scroll_hotbar(1)
+                self._scroll_frames_since = 0
+        elif direction == 'down':
+            # Hotbar previous slot (rate-limited)
+            if self._scroll_frames_since >= self.scroll_interval_frames:
+                self.controller.scroll_hotbar(-1)
+                self._scroll_frames_since = 0
     
     def _handle_movement(self, gesture_results):
         """

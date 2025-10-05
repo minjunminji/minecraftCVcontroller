@@ -22,6 +22,7 @@ from gestures.menuclose import MenuCloseDetector
 from gestures.cursor_control import CursorControlDetector, is_in_menu_mode
 from gestures.attack import AttackDetector
 from gestures.looking import LookingDetector
+from gestures.hand_scroll import HandScrollDetector
 
 
 def main():
@@ -84,6 +85,7 @@ def main():
         'placing': PlacingDetector(),       # Right hand: placing / using items
         'movement': MovementDetector(),     # Locomotion
         'looking': LookingDetector(),       # Head rotation: mouse control (looking around)
+        'hand_scroll': HandScrollDetector(), # Left hand rotation: scroll wheel
     }
     enabled_count = sum(1 for detector in gesture_detectors.values() if detector.is_enabled())
     print(f"✓ {enabled_count} gesture detector(s) enabled / {len(gesture_detectors)} total initialized")
