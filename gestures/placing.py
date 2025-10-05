@@ -83,16 +83,6 @@ class PlacingDetector(BaseGestureDetector):
         if self._state["last_close_time"] is not None:
             time_since_close = current_time - self._state["last_close_time"]
         
-        # Debug logging
-        if self.debug and (time_since_close is not None or normalized_area < self.close_threshold):
-            gr_str = f"{growth_rate:.2f}" if growth_rate is not None else "None"
-            tsc_str = f"{time_since_close:.2f}" if time_since_close is not None else "None"
-            scale_type = hand_metrics.get("scale_type", "unknown")
-            scale_val = hand_metrics.get("scale", 0)
-            print(f"[PLACING DEBUG] area={normalized_area:.3f} (raw={raw_area:.3f}), "
-                  f"scale={scale_val:.3f}({scale_type}), base={base_area:.3f}, delta={area_increase:.3f}, "
-                  f"growth_rate={gr_str}, time_since_close={tsc_str}")
-        
         # Primary detection path: Fast opening with growth rate
         primary_trigger = (
             not cooldown_active
@@ -153,10 +143,6 @@ class PlacingDetector(BaseGestureDetector):
                 confidence = self._compute_confidence(area_increase, growth_rate) * 0.9
             else:  # permissive_trigger
                 confidence = self._compute_confidence(area_increase, growth_rate) * 0.8
-            
-            if self.debug:
-                print(f"[PLACING] ✓ DETECTED via {trigger_type}! area={normalized_area:.3f}, "
-                      f"delta={area_increase:.3f}, growth={growth_rate:.2f}, conf={confidence:.3f}")
             
             self._state["cooldown_end"] = current_time + self.cooldown
             self._state["last_close_time"] = None

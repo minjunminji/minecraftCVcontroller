@@ -342,20 +342,9 @@ class MinecraftController(GameController):
             y: Screen y coordinate
         """
         try:
-            # Get current position before setting
-            before = self.mouse.position
-            
-            # Set new position
             self.mouse.position = (x, y)
-            
-            # Verify it was set
-            after = self.mouse.position
-            print(f"🖱️  [CONTROLLER] Cursor move: {before} → {after} (requested: ({x}, {y}))")
-            
-            if before == after:
-                print(f"⚠️  [CONTROLLER] Warning: Cursor didn't move! Still at {after}")
         except Exception as e:
-            print(f"❌ [CONTROLLER] Error setting cursor position: {e}")
+            print(f"Error setting cursor position: {e}")
     
     def get_cursor_position(self):
         """

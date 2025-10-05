@@ -241,7 +241,6 @@ class CursorControlDetector(BaseGestureDetector):
         
         # Only operate in menu mode
         in_menu = is_in_menu_mode()
-        print(f"🔍 [CURSOR] is_in_menu_mode() = {in_menu}")
         if not in_menu:
             self._state['last_cursor_x'] = None
             self._state['last_cursor_y'] = None
@@ -271,7 +270,6 @@ class CursorControlDetector(BaseGestureDetector):
         # Get shoulder width for scaling
         shoulder_width = self._get_shoulder_width(state_manager)
         if shoulder_width is None:
-            print(f"⚠️  [CURSOR] Cannot detect shoulder width")
             return None
         
         # Cache shoulder width
@@ -336,13 +334,9 @@ class CursorControlDetector(BaseGestureDetector):
                             print(f"� [CURSOR] {current_state} | distance: {pinch_distance:.4f} (need: ≤{self.pinch_threshold:.4f})")
                 else:
                     # Currently pinching - check if we should release
-                    print(f"🤏 [CURSOR] {current_state} | distance: {pinch_distance:.4f} (release: >{self.pinch_release_threshold:.4f})")
                     if pinch_distance > self.pinch_release_threshold:
                         self._state['is_pinching'] = False
                         self._state['pinch_start_distance'] = None
-                        print(f"👋 [CURSOR] Pinch RELEASED. Ready for next click.")
-        else:
-            print(f"⚠️  [CURSOR] Missing finger landmarks (thumb: {right_thumb_tip is not None}, index: {right_index_tip is not None})")
         
         # Return cursor control action
         result = {
