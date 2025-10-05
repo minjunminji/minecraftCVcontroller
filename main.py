@@ -18,6 +18,7 @@ from gestures.mining import MiningDetector
 from gestures.placing import PlacingDetector
 from gestures.movement import MovementDetector
 from gestures.inventory import InventoryDetector
+from gestures.menuclose import MenuCloseDetector
 from gestures.cursor_control import CursorControlDetector
 from gestures.attack import AttackDetector
 
@@ -75,6 +76,7 @@ def main():
     gesture_detectors = {
         'shield': ShieldDetector(),         # Left hand: shield block
         'inventory': InventoryDetector(),   # Left hand: inventory open
+        'menuclose': MenuCloseDetector(),   # Left hand: menu close (opposite of inventory)
         'cursor_control': CursorControlDetector(),  # Right hand: menu cursor control
         'attack': AttackDetector(),         # Right hand: single left clicks (attacking)
         'mining': MiningDetector(),         # Right hand: mining / continuous attacking
@@ -134,7 +136,7 @@ def main():
                         gesture_results[name] = result
                 
                 # Map left hand gestures (priority order)
-                left_hand_priority = ['inventory', 'shield']
+                left_hand_priority = ['menuclose', 'inventory', 'shield']
                 for gesture_name in left_hand_priority:
                     if gesture_name in gesture_results:
                         gesture_payload = gesture_results[gesture_name]
