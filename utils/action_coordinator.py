@@ -138,7 +138,7 @@ class ActionCoordinator:
         if left_hand is None:
             # Release any active left hand actions
             if self.left_hand_action == 'shield':
-                self.controller.stop_using_item()
+                self.controller.release_right_click()
             self.left_hand_action = None
             return
         
@@ -163,18 +163,18 @@ class ActionCoordinator:
         # Shield gesture
         if action_type == 'shield_start':
             if self.left_hand_action != 'shield':
-                self.controller.start_using_item()
+                self.controller.hold_right_click()
                 self.left_hand_action = 'shield'
         
         elif action_type == 'shield_hold':
             # Continue holding shield (maintain current state)
             if self.left_hand_action != 'shield':
-                self.controller.start_using_item()
+                self.controller.hold_right_click()
                 self.left_hand_action = 'shield'
                 
         elif action_type == 'shield_stop':
             if self.left_hand_action == 'shield':
-                self.controller.stop_using_item()
+                self.controller.release_right_click()
                 self.left_hand_action = None
     
     def _handle_right_hand_actions(self, gesture_results):
@@ -185,9 +185,9 @@ class ActionCoordinator:
         
         if right_hand is None:
             if self.right_hand_action == 'mining':
-                self.controller.stop_mining()
-            elif self.right_hand_action == 'using':
-                self.controller.stop_using_item()
+                self.controller.release_left_click()
+            elif self.right_hand_action == 'placing':
+                self.controller.release_right_click()
             self.right_hand_action = None
             return
         
@@ -195,29 +195,29 @@ class ActionCoordinator:
         
         # Mining gestures
         if action_type == 'mining_click':
-            self.controller.attack()
+            self.controller.single_left_click()
             self.right_hand_action = 'attack'
         
         elif action_type == 'mining_start_hold':
             if self.right_hand_action != 'mining':
-                self.controller.start_mining()
+                self.controller.hold_left_click()
             self.right_hand_action = 'mining'
         
         elif action_type == 'mining_continue_hold':
             if self.right_hand_action != 'mining':
-                self.controller.start_mining()
+                self.controller.hold_left_click()
             self.right_hand_action = 'mining'
         
         elif action_type == 'mining_stop_hold':
             if self.right_hand_action == 'mining':
-                self.controller.stop_mining()
+                self.controller.release_left_click()
             self.right_hand_action = None
         
         # Placing gesture
         elif action_type == 'place':
             if self.right_hand_action == 'mining':
-                self.controller.stop_mining()
-            self.controller.use_item()
+                self.controller.release_left_click()
+            self.controller.single_right_click()
             self.right_hand_action = 'placing'
         
         # Turning knob gesture (hotbar scroll)
@@ -305,8 +305,8 @@ class ActionCoordinator:
         
         # Release all gameplay-related inputs
         self.controller.stop_moving()
-        self.controller.stop_mining()
-        self.controller.stop_using_item()
+        self.controller.release_left_click()
+        self.controller.release_right_click()
         
         if open_inventory:
             self.controller.open_inventory()
@@ -352,4 +352,5 @@ class ActionCoordinator:
             'right_hand': self.right_hand_action,
             'pressed_keys': self.controller.get_pressed_keys(),
             'pressed_buttons': self.controller.get_pressed_buttons(),
+            'recent_actions': self.controller.get_recent_actions(),
         }

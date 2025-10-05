@@ -135,7 +135,7 @@ def main():
                         break
                 
                 # Map right hand gestures (priority order)
-                right_hand_priority = ['mining', 'placing']
+                right_hand_priority = ['placing', 'mining']
                 for gesture_name in right_hand_priority:
                     if gesture_name in gesture_results:
                         gesture_payload = gesture_results[gesture_name]
@@ -214,12 +214,13 @@ def main():
                     })
                     y_pos += 30
                     
-                    # Show what's actually being pressed
+                    # Show what's actually being pressed (held)
                     pressed_keys = action_status.get('pressed_keys', [])
                     pressed_buttons = action_status.get('pressed_buttons', [])
-                    
+                    recent_actions = action_status.get('recent_actions', [])
+
                     if pressed_keys:
-                        keys_text = f"Keys: {', '.join([str(k).upper() for k in pressed_keys])}"
+                        keys_text = f"Held Keys: {', '.join([str(k).upper() for k in pressed_keys])}"
                         overlay_texts.append({
                             'text': keys_text,
                             'position': (left_x, y_pos),
@@ -228,9 +229,9 @@ def main():
                             'thickness': 1
                         })
                         y_pos += 25
-                    
+
                     if pressed_buttons:
-                        buttons_text = f"Mouse: {', '.join([b.upper() for b in pressed_buttons])}"
+                        buttons_text = f"Held Mouse: {', '.join([b.upper() for b in pressed_buttons])}"
                         overlay_texts.append({
                             'text': buttons_text,
                             'position': (left_x, y_pos),
@@ -239,8 +240,31 @@ def main():
                             'thickness': 1
                         })
                         y_pos += 25
-                    
-                    if not pressed_keys and not pressed_buttons:
+
+                    # Show recent one-time actions (clicks, taps, scrolls)
+                    if recent_actions:
+                        for action_type, action_name in recent_actions:
+                            action_text = f"{action_type.capitalize()}: {action_name}"
+                            # Different colors for different action types
+                            if action_type == 'click':
+                                color = (255, 128, 0)  # Orange for clicks
+                            elif action_type == 'tap':
+                                color = (128, 255, 128)  # Light green for taps
+                            elif action_type == 'scroll':
+                                color = (255, 255, 128)  # Yellow for scrolls
+                            else:
+                                color = (200, 200, 200)  # Gray for others
+                            
+                            overlay_texts.append({
+                                'text': action_text,
+                                'position': (left_x, y_pos),
+                                'scale': 0.5,
+                                'color': color,
+                                'thickness': 1
+                            })
+                            y_pos += 25
+
+                    if not pressed_keys and not pressed_buttons and not recent_actions:
                         overlay_texts.append({
                             'text': "None",
                             'position': (left_x, y_pos),
@@ -287,17 +311,48 @@ def main():
             
             # Mirror the frame for preview only
             frame_display = cv2.flip(frame_display, 1)
+            frame_height, frame_width = frame_display.shape[:2]
             
             # Draw textual overlays on mirrored frame
+            font_face = cv2.FONT_HERSHEY_SIMPLEX
             for overlay in overlay_texts:
+                text = overlay['text']
+                position = overlay['position']
+                font_scale = overlay['scale']
+                color = overlay['color']
+                thickness = overlay['thickness']
+                background_color = overlay.get('background', (0, 0, 0))
+                padding = overlay.get('background_padding', 6)
+                
+                if background_color is not None:
+                    text_size, baseline = cv2.getTextSize(
+                        text,
+                        font_face,
+                        font_scale,
+                        thickness
+                    )
+                    text_width, text_height = text_size
+                    x, y = position
+                    top_left_x = max(x - padding, 0)
+                    top_left_y = max(y - text_height - padding, 0)
+                    bottom_right_x = min(x + text_width + padding, frame_width)
+                    bottom_right_y = min(y + baseline + padding, frame_height)
+                    cv2.rectangle(
+                        frame_display,
+                        (top_left_x, top_left_y),
+                        (bottom_right_x, bottom_right_y),
+                        background_color,
+                        -1
+                    )
+                
                 cv2.putText(
                     frame_display,
-                    overlay['text'],
-                    overlay['position'],
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    overlay['scale'],
-                    overlay['color'],
-                    overlay['thickness']
+                    text,
+                    position,
+                    font_face,
+                    font_scale,
+                    color,
+                    thickness
                 )
             
             # Show the frame
