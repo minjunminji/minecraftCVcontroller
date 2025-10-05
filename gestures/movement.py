@@ -24,8 +24,10 @@ from gestures.base_detector import BaseGestureDetector
 WALK_ENTER_THRESHOLD = 0.15   # Enter WALKING state
 WALK_EXIT_THRESHOLD = 0.08    # Exit to IDLE (hysteresis gap)
 VISIBILITY_THRESHOLD = 0.6     # MediaPipe visibility confidence minimum
-MIN_STABLE_FRAMES = 5          # Frames required for stable state transition
-LEAN_SIMPLE_THRESHOLD = 0.03   # Normalized X-displacement for torso lean
+MIN_STABLE_FRAMES = 2          # Frames required for stable state transition
+LEAN_THRESHOLD = 0.01          # Normalized X-displacement for torso lean (configurable)
+LEAN_DEADZONE = 0.005           # Minimum displacement to ignore (noise/small movements)
+LEAN_COOLDOWN_FRAMES = 10      # Frames to wait after lean ends before allowing walking (0.5s at 30fps)
 
 
 class MovementState:
@@ -56,7 +58,7 @@ class MovementState:
         
         # Check if score is stable (small change from previous frame)
         score_delta = abs(leg_motion_score - self.last_leg_motion_score)
-        if score_delta < 0.05:  # Stability threshold
+        if score_delta < 0.5:  # Stability threshold
             self.stable_frame_count += 1
         else:
             self.stable_frame_count = 0
@@ -97,7 +99,7 @@ class MovementDetector(BaseGestureDetector):
     which is more robust to camera angles than 3D vector approaches.
     """
     
-    def __init__(self):
+    def __init__(self, lean_threshold=LEAN_THRESHOLD, lean_deadzone=LEAN_DEADZONE):
         super().__init__("movement")
         
         # State machine for IDLE ↔ WALKING transitions
@@ -110,6 +112,14 @@ class MovementDetector(BaseGestureDetector):
         # Calibration data
         self.scale_factor = None  # Torso height for normalization
         self.baseline_ankle_y = None
+        
+        # Configurable lean detection thresholds
+        self.lean_threshold = lean_threshold
+        self.lean_deadzone = lean_deadzone
+        
+        # Lean cooldown tracking for hysteresis
+        self.lean_cooldown_timer = 0  # Frames remaining in cooldown
+        self.last_lean_detected = None  # Track previous lean state
     
     def detect(self, state_manager):
         """
@@ -140,14 +150,35 @@ class MovementDetector(BaseGestureDetector):
             if self.scale_factor is None:
                 return None  # Can't normalize without scale
         
+        # Detect torso lean for strafing first (to track state changes)
+        torso_lean = self._detect_torso_lean_simple(state_manager)
+        print(f"torso lean: {torso_lean}")
+        
+        # Track lean state changes for cooldown management
+        if self.last_lean_detected is not None and torso_lean is None:
+            # Lean just ended, start cooldown
+            self.lean_cooldown_timer = LEAN_COOLDOWN_FRAMES
+        elif torso_lean is not None:
+            # Lean is active, reset cooldown
+            self.lean_cooldown_timer = 0
+        elif self.lean_cooldown_timer > 0:
+            # Decrement cooldown timer
+            self.lean_cooldown_timer -= 1
+        
+        self.last_lean_detected = torso_lean
+        
         # Detect leg motion (walking-in-place)
         leg_motion_score = self._detect_leg_motion(state_manager)
+        print(f"leg motion score {leg_motion_score}")
+        
+        # Apply cooldown: suppress walking detection if we're in cooldown period
+        if self.lean_cooldown_timer > 0:
+            print(f"Lean cooldown active ({self.lean_cooldown_timer} frames remaining) - suppressing walking")
+            leg_motion_score = 0.0  # Force no walking detection during cooldown
         
         # Update state machine with hysteresis
         is_walking = self.movement_state.update(leg_motion_score)
-        
-        # Detect torso lean for strafing (independent of walking state)
-        torso_lean = self._detect_torso_lean_simple(state_manager)
+        print(f"is walking? {is_walking}")
         
         # Return result if any movement detected
         if is_walking or torso_lean is not None:
@@ -382,11 +413,14 @@ class MovementDetector(BaseGestureDetector):
         # Horizontal displacement (normalized by scale)
         displacement = (nose_x - shoulder_mid_x) / self.scale_factor
         
-        # Apply thresholds to determine lean direction
-        if displacement > LEAN_SIMPLE_THRESHOLD:
-            lean = 'right'
-        elif displacement < -LEAN_SIMPLE_THRESHOLD:
+        # Apply deadzone to filter out noise and small movements
+        if abs(displacement) < self.lean_deadzone:
+            lean = None
+        # Apply thresholds to determine lean direction (swapped: positive = left)
+        elif displacement > self.lean_threshold:
             lean = 'left'
+        elif displacement < -self.lean_threshold:
+            lean = 'right'
         else:
             lean = None
         
@@ -408,3 +442,5 @@ class MovementDetector(BaseGestureDetector):
         self.lean_history.clear()
         self.scale_factor = None
         self.baseline_ankle_y = None
+        self.lean_cooldown_timer = 0
+        self.last_lean_detected = None

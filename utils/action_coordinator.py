@@ -92,8 +92,6 @@ class ActionCoordinator:
                 self.active_movement = None
             return
         
-        # Apply movement rules from diagram
-        action = movement.get('action')
         is_walking = movement.get('is_walking', False)
         left_thumb_back = movement.get('left_thumb_back', False)
         torso_lean = movement.get('torso_lean')
@@ -101,14 +99,14 @@ class ActionCoordinator:
         new_movement = None
         
         # Determine movement direction
-        if is_walking and not left_thumb_back:
-            new_movement = 'w'  # Forward
-        elif left_thumb_back:
-            new_movement = 's'  # Backward
-        elif torso_lean == 'left':
+        if torso_lean == 'left':
             new_movement = 'a'  # Strafe left
         elif torso_lean == 'right':
             new_movement = 'd'  # Strafe right
+        elif left_thumb_back:
+            new_movement = 's'  # Backward
+        else:
+            new_movement = 'w'  # Forward
         
         # Update movement if changed
         if new_movement != self.active_movement:
