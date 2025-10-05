@@ -91,7 +91,7 @@ def main():
     print("=" * 60)
     print("\nControls:")
     print("  'q' - Quit application")
-    print("  'r' - Reset all actions")
+    print("  'r' - Toggle gestures ON/OFF")
     print("  'd' - Toggle debug display")
     print("  'm' - Toggle menu/cursor mode")
     print("  'c' - Calibrate neutral pose")
@@ -106,6 +106,15 @@ def main():
     
     # Manual menu/cursor mode toggle
     menu_mode_enabled = False  # Toggle with 'm' key
+    
+    # Global gesture enable/disable toggle
+    gestures_enabled = False  # Toggle with 'r' key
+    
+    # Create window and configure for always-on-top display
+    window_name = 'MineMotion - Gesture Control'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
+    cv2.moveWindow(window_name, 0, 0)  # Position at top-left corner
     
     try:
         while True:
@@ -124,7 +133,7 @@ def main():
             
             # === STEP 3: Run gesture detection ===
             gesture_results = {}
-            if landmarks_dict is not None:
+            if landmarks_dict is not None and gestures_enabled:
                 # Run all enabled gesture detectors
                 for name, detector in gesture_detectors.items():
                     # Pass menu mode flag to cursor_control detector
@@ -347,6 +356,19 @@ def main():
                 
                 frame_height = frame_display.shape[0]
                 
+                # Show gesture status (large, prominent indicator)
+                gesture_text = f"GESTURES: {'ENABLED' if gestures_enabled else 'DISABLED'}"
+                gesture_color = (0, 255, 0) if gestures_enabled else (0, 0, 255)
+                overlay_texts.append({
+                    'text': gesture_text,
+                    'position': (10, frame_height - 100),
+                    'scale': 0.6,
+                    'color': gesture_color,
+                    'thickness': 2,
+                    'background': (0, 0, 0),
+                    'background_padding': 8
+                })
+                
                 # Show menu mode status
                 mode_text = f"Menu Mode: {'ON' if menu_mode_enabled else 'OFF'}"
                 mode_color = (0, 255, 0) if menu_mode_enabled else (128, 128, 128)
@@ -367,7 +389,7 @@ def main():
                 })
                 
                 overlay_texts.append({
-                    'text': "MineMotion - Press 'q' to quit, 'd' for debug, 'm' for menu mode, 'r' to reset",
+                    'text': "MineMotion - Press 'q' to quit, 'd' for debug, 'm' for menu mode, 'r' to toggle gestures",
                     'position': (10, frame_height - 10),
                     'scale': 0.4,
                     'color': (255, 255, 255),
@@ -421,7 +443,7 @@ def main():
                 )
             
             # Show the frame
-            cv2.imshow('MineMotion - Gesture Control', frame_display)
+            cv2.imshow(window_name, frame_display)
             
             # Handle keyboard input
             key = cv2.waitKey(1) & 0xFF
@@ -430,12 +452,11 @@ def main():
                 print("\nQuitting...")
                 break
             elif key == ord('r'):
-                print("\nResetting all actions...")
-                action_coordinator.reset()
-                for detector in gesture_detectors.values():
-                    detector.reset()
-                state_manager.clear_history()
-                calibrated = False
+                gestures_enabled = not gestures_enabled
+                if not gestures_enabled:
+                    # Release all active controls when disabling gestures
+                    action_coordinator.reset()
+                print(f"\nGestures: {'ENABLED' if gestures_enabled else 'DISABLED'}")
             elif key == ord('d'):
                 debug_display = not debug_display
                 print(f"\nDebug display: {'ON' if debug_display else 'OFF'}")
