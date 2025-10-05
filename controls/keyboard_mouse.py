@@ -4,6 +4,7 @@ Keyboard and Mouse controller for game input
 
 import platform
 import time
+import traceback
 from collections import deque
 
 # Try to import pynput for cross-platform support
@@ -77,7 +78,9 @@ class GameController:
             self.keyboard.press(key)
             self.pressed_keys.add(key_name)
         except Exception as e:
-            print(f"Error pressing key {key_name}: {e}")
+            print(f"⚠ Error pressing key {key_name}: {e}")
+            # Don't add to pressed_keys if press failed
+            traceback.print_exc()
     
     def release_key(self, key_name):
         """
@@ -94,7 +97,10 @@ class GameController:
             self.keyboard.release(key)
             self.pressed_keys.discard(key_name)
         except Exception as e:
-            print(f"Error releasing key {key_name}: {e}")
+            print(f"⚠ Error releasing key {key_name}: {e}")
+            # Remove from pressed_keys even if release failed to prevent stuck state
+            self.pressed_keys.discard(key_name)
+            traceback.print_exc()
     
     def tap_key(self, key_name, duration=0.05):
         """
@@ -125,7 +131,9 @@ class GameController:
             self.mouse.press(button)
             self.pressed_buttons.add(button_name)
         except Exception as e:
-            print(f"Error pressing mouse button {button_name}: {e}")
+            print(f"⚠ Error pressing mouse button {button_name}: {e}")
+            # Don't add to pressed_buttons if press failed
+            traceback.print_exc()
     
     def release_mouse(self, button_name='left'):
         """
@@ -142,7 +150,10 @@ class GameController:
             self.mouse.release(button)
             self.pressed_buttons.discard(button_name)
         except Exception as e:
-            print(f"Error releasing mouse button {button_name}: {e}")
+            print(f"⚠ Error releasing mouse button {button_name}: {e}")
+            # Remove from pressed_buttons even if release failed to prevent stuck state
+            self.pressed_buttons.discard(button_name)
+            traceback.print_exc()
     
     def click_mouse(self, button_name='left', count=1):
         """
@@ -158,7 +169,8 @@ class GameController:
             # Track this one-time action
             self.recent_actions.append((time.time(), 'click', f"{button_name.upper()} MOUSE"))
         except Exception as e:
-            print(f"Error clicking mouse button {button_name}: {e}")
+            print(f"⚠ Error clicking mouse button {button_name}: {e}")
+            traceback.print_exc()
     
     def move_mouse(self, dx, dy):
         """

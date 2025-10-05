@@ -105,10 +105,14 @@ def main():
     current_fps = 0
     
     # Manual menu/cursor mode toggle
-    menu_mode_enabled = False  # Toggle with 'm' key
+    menu_mode_enabled = None  # Toggle with 'm' key
     
     # Global gesture enable/disable toggle
     gestures_enabled = False  # Toggle with 'r' key
+    
+    # Error tracking
+    last_error_time = None
+    error_message = None
     
     # Create window and configure for always-on-top display
     window_name = 'MineMotion - Gesture Control'
@@ -167,7 +171,24 @@ def main():
                         break
                 
                 # === STEP 4: Execute actions via coordinator ===
-                action_coordinator.execute(gesture_results, state_manager)
+                try:
+                    action_coordinator.execute(gesture_results, state_manager)
+                    # Clear error if action succeeded
+                    if error_message is not None and (last_error_time is None or time.time() - last_error_time > 3):
+                        error_message = None
+                except Exception as e:
+                    current_time = time.time()
+                    error_message = f"Controller Error: {str(e)[:50]}"
+                    last_error_time = current_time
+                    print(f"\n⚠ ERROR in action execution: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Try to recover by resetting
+                    try:
+                        action_coordinator.reset()
+                        print("✓ Action coordinator reset after error")
+                    except:
+                        pass
             
             # === STEP 5: Prepare frame for display ===
             frame_display = frame.copy()
@@ -183,6 +204,31 @@ def main():
                     # Prepare textual overlays
                     left_x = 10
                     y_pos = 30
+                    
+                    # Show current mode prominently
+                    mode_display = action_status.get('mode', 'unknown').upper()
+                    mode_display_color = (0, 255, 255) if mode_display == 'MENU' else (255, 255, 255)
+                    overlay_texts.append({
+                        'text': f"MODE: {mode_display}",
+                        'position': (left_x, y_pos),
+                        'scale': 0.6,
+                        'color': mode_display_color,
+                        'thickness': 2,
+                        'background': (0, 0, 0),
+                        'background_padding': 5
+                    })
+                    y_pos += 35
+                    
+                    # Show exit hint when in menu mode
+                    if mode_display == 'MENU':
+                        overlay_texts.append({
+                            'text': "→ Swipe left hand RIGHT-TO-LEFT to exit menu",
+                            'position': (left_x, y_pos),
+                            'scale': 0.45,
+                            'color': (0, 255, 255),
+                            'thickness': 1
+                        })
+                        y_pos += 25
                     
                     overlay_texts.append({
                         'text': "GESTURES:",
@@ -247,7 +293,14 @@ def main():
                                 action_display = action.replace('_', ' ').title()
                                 
                                 text = f"{gesture_name}: {action_display}"
-                                color = (128, 128, 255) if 'shield' in gesture_name else (255, 255, 255)
+                                # Highlight menu close gesture in cyan when in menu mode
+                                if gesture_name == 'menuclose' and action_status.get('mode') == 'menu':
+                                    color = (0, 255, 255)  # Cyan - stands out
+                                elif 'shield' in gesture_name:
+                                    color = (128, 128, 255)
+                                else:
+                                    color = (255, 255, 255)
+                                
                                 overlay_texts.append({
                                     'text': text,
                                     'position': (left_x, y_pos),
@@ -356,6 +409,18 @@ def main():
                 
                 frame_height = frame_display.shape[0]
                 
+                # Show error message if present
+                if error_message is not None:
+                    overlay_texts.append({
+                        'text': f"⚠ {error_message}",
+                        'position': (10, frame_height - 130),
+                        'scale': 0.6,
+                        'color': (0, 165, 255),  # Orange
+                        'thickness': 2,
+                        'background': (0, 0, 0),
+                        'background_padding': 8
+                    })
+                
                 # Show gesture status (large, prominent indicator)
                 gesture_text = f"GESTURES: {'ENABLED' if gestures_enabled else 'DISABLED'}"
                 gesture_color = (0, 255, 0) if gestures_enabled else (0, 0, 255)
@@ -456,6 +521,9 @@ def main():
                 if not gestures_enabled:
                     # Release all active controls when disabling gestures
                     action_coordinator.reset()
+                    # Clear error state
+                    error_message = None
+                    last_error_time = None
                 print(f"\nGestures: {'ENABLED' if gestures_enabled else 'DISABLED'}")
             elif key == ord('d'):
                 debug_display = not debug_display

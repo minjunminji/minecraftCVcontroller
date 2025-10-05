@@ -54,7 +54,11 @@ class ActionCoordinator:
             self._execute_menu_actions(gesture_results, state_manager)
     
     def _execute_gameplay_actions(self, gesture_results, state_manager):
-        """Execute actions during gameplay mode."""
+        """
+        Execute actions during gameplay mode.
+        
+        Note: This should only be called when in gameplay mode.
+        """
         
         # 1. Handle movement actions
         self._handle_movement(gesture_results)
@@ -62,10 +66,10 @@ class ActionCoordinator:
         # 2. Handle jumping
         self._handle_jumping(gesture_results)
         
-        # 3. Handle left hand actions (mining, attacking, shield)
+        # 3. Handle left hand actions (mining, attacking, shield, inventory)
         self._handle_left_hand_actions(gesture_results)
         
-        # 4. Handle right hand actions (placing, using items)
+        # 4. Handle right hand actions (placing, using items, attacking)
         self._handle_right_hand_actions(gesture_results)
         
         # 5. Handle head look (mouse movement)
@@ -132,6 +136,8 @@ class ActionCoordinator:
     def _handle_left_hand_actions(self, gesture_results):
         """
         Handle left hand actions: shield, inventory, swipe in and out
+        
+        Note: This is only called during gameplay mode, not menu mode
         """
         left_hand = gesture_results.get('left_hand')
         
@@ -144,16 +150,19 @@ class ActionCoordinator:
         
         action_type = left_hand.get('action')
         
-        # Menu close gesture (opposite of inventory open)
-        if action_type == 'menu_close':
-            if self.current_mode == 'menu':
-                self._exit_menu_mode()
-            return
-        
-        # Inventory gesture
+        # Inventory gesture - switch to menu mode
         if action_type == 'inventory_open':
             if self.current_mode != 'menu':
+                print(f"[ACTION COORDINATOR] Inventory gesture detected, entering menu mode")
                 self._enter_menu_mode(open_inventory=True)
+            return
+        
+        # Menu close gesture - only works if we're somehow stuck in menu mode
+        # (Normal menu exit is handled in _execute_menu_actions)
+        if action_type == 'menu_close':
+            if self.current_mode == 'menu':
+                print(f"[ACTION COORDINATOR] Menu close detected in gameplay handler")
+                self._exit_menu_mode()
             return
         
         # Menu navigation gestures
@@ -266,15 +275,52 @@ class ActionCoordinator:
             self._exit_menu_mode()
     
     def _execute_menu_actions(self, gesture_results, state_manager):
-        """Execute actions during menu mode."""
+        """
+        Execute actions during menu mode.
+        
+        In menu mode, ONLY the following gestures are processed:
+        - menu_close (left hand): Exit menu and return to gameplay
+        - cursor_control (right hand): Navigate menus with hand position
+        
+        ALL other gestures (attack, mining, shield, placing, etc.) are IGNORED.
+        """
         _ = state_manager  # Placeholder for future expansions
         
-        # Allow mode switches (e.g., cursor lock/unlock) to modify state while in menu
-        self._handle_mode_switches(gesture_results)
-        if self.current_mode != 'menu':
-            return
+        # Safety check: Release any stuck actions from gameplay mode
+        # This prevents left/right click from staying held when entering menu
+        if self.right_hand_action in ['mining', 'attack', 'placing']:
+            self.controller.release_left_click()
+            self.controller.release_right_click()
+            self.right_hand_action = None
         
-        # Handle cursor control for menu navigation
+        if self.left_hand_action == 'shield':
+            self.controller.release_right_click()
+            self.left_hand_action = None
+        
+        # ========== ONLY PROCESS MENU-SPECIFIC GESTURES ==========
+        
+        # 1. Check for menu exit gesture (highest priority)
+        left_hand = gesture_results.get('left_hand')
+        if left_hand:
+            menu_hand_action = left_hand.get('action')
+            menu_hand_source = left_hand.get('source', 'unknown')
+            
+            # ONLY process menu_close action in menu mode
+            if menu_hand_action == 'menu_close':
+                print(f"[ACTION COORDINATOR] Menu close gesture detected (source: {menu_hand_source})")
+                self._exit_menu_mode()
+                return
+            
+            # Legacy support for menu swipe (if it exists)
+            if menu_hand_action == 'menu_swipe_left':
+                print(f"[ACTION COORDINATOR] Menu swipe left detected, exiting menu")
+                self._exit_menu_mode()
+                return
+            
+            # All other left hand gestures are IGNORED in menu mode
+            # (shield, inventory_open, etc. should not trigger)
+        
+        # 2. Handle cursor control for menu navigation (right hand)
         cursor_control = gesture_results.get('cursor_control')
         if cursor_control:
             action = cursor_control.get('action')
@@ -290,32 +336,25 @@ class ActionCoordinator:
                 if cursor_control.get('click'):
                     self.controller.click_mouse('left')
         
-        left_hand = gesture_results.get('left_hand')
-        if left_hand:
-            menu_hand_action = left_hand.get('action')
-            if menu_hand_action == 'menu_swipe_left':
-                self._exit_menu_mode()
-                return
-            elif menu_hand_action == 'menu_swipe_right':
-                # Maintain menu state without re-sending inventory toggle
-                self._enter_menu_mode(open_inventory=False)
-        
+        # 3. Handle generic menu actions (if any)
         menu_action = gesture_results.get('menu_action')
-        
         if menu_action == 'select':
             self.controller.click_mouse('left')
         elif menu_action == 'back':
             self._exit_menu_mode()
+        
+        # NOTE: All right hand gameplay gestures (attack, mining, placing)
+        # are intentionally IGNORED in menu mode
     
     def _enter_menu_mode(self, open_inventory=True):
         """Switch to menu mode."""
         if self.current_mode == 'menu':
             return
         
-        # Release all gameplay-related inputs
-        self.controller.stop_moving()
-        self.controller.release_left_click()
-        self.controller.release_right_click()
+        print(f"[ACTION COORDINATOR] Entering menu mode (open_inventory={open_inventory})")
+        
+        # Release ALL inputs before entering menu mode
+        self.controller.release_all()
         
         if open_inventory:
             self.controller.open_inventory()
@@ -324,10 +363,18 @@ class ActionCoordinator:
         self.active_movement = None
         self.left_hand_action = None
         self.right_hand_action = None
+        self.is_jumping = False
+        self.is_sprinting = False
+        self.is_sneaking = False
     
     def _exit_menu_mode(self):
         """Send ESC to exit menus and return to gameplay mode."""
         was_in_menu = self.current_mode == 'menu'
+        
+        print("[ACTION COORDINATOR] Exiting menu mode")
+        
+        # Release all inputs before sending ESC (in case anything is stuck)
+        self.controller.release_all()
         
         # Always send ESC to close any open UI
         self.controller.tap_key('esc')
@@ -337,6 +384,9 @@ class ActionCoordinator:
             self.active_movement = None
             self.left_hand_action = None
             self.right_hand_action = None
+            self.is_jumping = False
+            self.is_sprinting = False
+            self.is_sneaking = False
     
     def reset(self):
         """Reset all actions and release all inputs."""
