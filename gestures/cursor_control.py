@@ -303,12 +303,11 @@ class CursorControlDetector(BaseGestureDetector):
         
         # Determine if we're in menu mode
         if force_menu_mode is not None:
-            # Manual override
+            # Manual override (from 'm' key toggle)
             in_menu = force_menu_mode
         else:
-            # Automatic detection (currently commented out)
-            # in_menu = is_in_menu_mode()
-            in_menu = False  # Default to off when not forced
+            # Automatic detection based on cursor capture state
+            in_menu = is_in_menu_mode()
         
         if not in_menu:
             self._state['last_cursor_x'] = None
@@ -460,6 +459,7 @@ class CursorControlDetector(BaseGestureDetector):
             'y': final_y,
             'pinch_distance': pinch_distance,
             'cursor_frozen': self._state['cursor_frozen'],
+            'in_menu_mode': in_menu,  # Include cursor capture state for mode coordination
         }
         
         # Add click action if pinch just occurred
