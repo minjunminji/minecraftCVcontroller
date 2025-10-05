@@ -144,6 +144,12 @@ class ActionCoordinator:
         
         action_type = left_hand.get('action')
         
+        # Menu close gesture (opposite of inventory open)
+        if action_type == 'menu_close':
+            if self.current_mode == 'menu':
+                self._exit_menu_mode()
+            return
+        
         # Inventory gesture
         if action_type == 'inventory_open':
             if self.current_mode != 'menu':

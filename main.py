@@ -18,6 +18,7 @@ from gestures.mining import MiningDetector
 from gestures.placing import PlacingDetector
 from gestures.movement import MovementDetector
 from gestures.inventory import InventoryDetector
+from gestures.menuclose import MenuCloseDetector
 from gestures.cursor_control import CursorControlDetector
 
 
@@ -74,6 +75,7 @@ def main():
     gesture_detectors = {
         'shield': ShieldDetector(),         # Left hand: shield block
         'inventory': InventoryDetector(),   # Left hand: inventory open
+        'menuclose': MenuCloseDetector(),   # Left hand: menu close
         'cursor_control': CursorControlDetector(),  # Right hand: menu cursor control
         'mining': MiningDetector(),         # FIXME: Right hand: mining / attacking
         'placing': PlacingDetector(),       # TODO: Right hand: placing / using items
@@ -89,7 +91,6 @@ def main():
     print("  'q' - Quit application")
     print("  'r' - Reset all actions")
     print("  'd' - Toggle debug display")
-    print("  'm' - Toggle menu/cursor mode")
     print("  'c' - Calibrate neutral pose")
     print("\nWaiting for person detection...")
     
@@ -99,9 +100,6 @@ def main():
     frame_count = 0
     fps_start_time = time.time()
     current_fps = 0
-    
-    # Manual menu/cursor mode toggle
-    menu_mode_enabled = False  # Toggle with 'm' key
     
     try:
         while True:
@@ -123,16 +121,12 @@ def main():
             if landmarks_dict is not None:
                 # Run all enabled gesture detectors
                 for name, detector in gesture_detectors.items():
-                    # Pass menu mode flag to cursor_control detector
-                    if name == 'cursor_control':
-                        result = detector.detect(state_manager, force_menu_mode=menu_mode_enabled)
-                    else:
-                        result = detector.detect(state_manager)
+                    result = detector.detect(state_manager)
                     if result is not None:
                         gesture_results[name] = result
                 
                 # Map left hand gestures (priority order)
-                left_hand_priority = ['inventory', 'shield']
+                left_hand_priority = ['menuclose', 'inventory', 'shield']
                 for gesture_name in left_hand_priority:
                     if gesture_name in gesture_results:
                         gesture_payload = gesture_results[gesture_name]
@@ -179,48 +173,6 @@ def main():
                         'thickness': 2
                     })
                     y_pos += 30
-
-                    # Show cursor coordinates from cursor_control (if available)
-                    cursor_result = gesture_results.get('cursor_control')
-                    if isinstance(cursor_result, dict):
-                        cx = cursor_result.get('x')
-                        cy = cursor_result.get('y')
-                        cursor_frozen = cursor_result.get('cursor_frozen', False)
-                        
-                        if cx is not None and cy is not None:
-                            # Color code cursor position based on freeze state
-                            cursor_color = (255, 128, 0) if cursor_frozen else (0, 255, 255)
-                            cursor_text = f"Cursor: ({int(cx)}, {int(cy)})"
-                            if cursor_frozen:
-                                cursor_text += " [FROZEN]"
-                            overlay_texts.append({
-                                'text': cursor_text,
-                                'position': (left_x, y_pos),
-                                'scale': 0.5,
-                                'color': cursor_color,
-                                'thickness': 1
-                            })
-                            y_pos += 25
-                        
-                        # Show pinch distance
-                        pinch_dist = cursor_result.get('pinch_distance')
-                        if pinch_dist is not None:
-                            # Color code based on thresholds (0.06 = pinch trigger, 0.10 = freeze)
-                            if pinch_dist <= 0.06:
-                                dist_color = (0, 255, 0)  # Green = click zone
-                            elif pinch_dist <= 0.10:
-                                dist_color = (255, 128, 0)  # Orange = freeze zone
-                            else:
-                                dist_color = (255, 255, 255)  # White = normal
-                            
-                            overlay_texts.append({
-                                'text': f"Pinch: {pinch_dist:.4f} (click: 0.06, freeze: 0.10)",
-                                'position': (left_x, y_pos),
-                                'scale': 0.5,
-                                'color': dist_color,
-                                'thickness': 1
-                            })
-                            y_pos += 25
                     
                     if gesture_results:
                         for gesture_name, gesture_data in gesture_results.items():
@@ -343,17 +295,6 @@ def main():
                 
                 frame_height = frame_display.shape[0]
                 
-                # Show menu mode status
-                mode_text = f"Menu Mode: {'ON' if menu_mode_enabled else 'OFF'}"
-                mode_color = (0, 255, 0) if menu_mode_enabled else (128, 128, 128)
-                overlay_texts.append({
-                    'text': mode_text,
-                    'position': (10, frame_height - 70),
-                    'scale': 0.5,
-                    'color': mode_color,
-                    'thickness': 2
-                })
-                
                 overlay_texts.append({
                     'text': f"FPS: {current_fps:.1f}",
                     'position': (10, frame_height - 40),
@@ -363,7 +304,7 @@ def main():
                 })
                 
                 overlay_texts.append({
-                    'text': "MineMotion - Press 'q' to quit, 'd' for debug, 'm' for menu mode, 'r' to reset",
+                    'text': "MineMotion - Press 'q' to quit, 'd' for debug, 'r' to reset",
                     'position': (10, frame_height - 10),
                     'scale': 0.4,
                     'color': (255, 255, 255),
@@ -435,9 +376,6 @@ def main():
             elif key == ord('d'):
                 debug_display = not debug_display
                 print(f"\nDebug display: {'ON' if debug_display else 'OFF'}")
-            elif key == ord('m'):
-                menu_mode_enabled = not menu_mode_enabled
-                print(f"\nMenu/Cursor mode: {'ON' if menu_mode_enabled else 'OFF'}")
             elif key == ord('c'):
                 if landmarks_dict is not None:
                     state_manager.set_calibration_baseline(landmarks_dict)
