@@ -2,6 +2,8 @@
 Shield gesture detector - detects shield blocking gesture
 """
 
+# may need to change logic to look at change in y position
+
 import numpy as np
 from gestures.base_detector import BaseGestureDetector
 

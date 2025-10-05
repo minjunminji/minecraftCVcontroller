@@ -17,6 +17,7 @@ from gestures.shield import ShieldDetector
 from gestures.mining import MiningDetector
 from gestures.placing import PlacingDetector
 from gestures.movement import MovementDetector
+from gestures.inventory import InventoryDetector
 
 
 def main():
@@ -71,6 +72,7 @@ def main():
     # Initialize gesture detectors
     gesture_detectors = {
         'shield': ShieldDetector(),      # Left hand: shield block
+        'inventory': InventoryDetector(), # Left hand: inventory open
         'mining': MiningDetector(),      # FIXME: Right hand: mining / attacking
         'placing': PlacingDetector(),    # TODO: Right hand: placing / using items
         'movement': MovementDetector(),  # TODO: Locomotion
@@ -120,7 +122,7 @@ def main():
                         gesture_results[name] = result
                 
                 # Map left hand gestures (priority order)
-                left_hand_priority = ['shield']
+                left_hand_priority = ['inventory', 'shield']
                 for gesture_name in left_hand_priority:
                     if gesture_name in gesture_results:
                         gesture_payload = gesture_results[gesture_name]
@@ -336,7 +338,7 @@ def main():
         print("\nCleaning up...")
         
         # Release all game controls
-        action_coordinator.reset()
+        action_coordinator.cleanup()
         print("✓ Released all game controls")
         
         # Release webcam

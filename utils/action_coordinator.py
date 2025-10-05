@@ -131,7 +131,7 @@ class ActionCoordinator:
     
     def _handle_left_hand_actions(self, gesture_results):
         """
-        Handle left hand actions: shield, swipe in and out
+        Handle left hand actions: shield, inventory, swipe in and out
         """
         left_hand = gesture_results.get('left_hand')
         
@@ -143,6 +143,12 @@ class ActionCoordinator:
             return
         
         action_type = left_hand.get('action')
+        
+        # Inventory gesture
+        if action_type == 'inventory_open':
+            if self.current_mode != 'menu':
+                self._enter_menu_mode(open_inventory=True)
+            return
         
         # Menu navigation gestures
         if action_type == 'menu_swipe_right':
