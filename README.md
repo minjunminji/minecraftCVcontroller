@@ -1,4 +1,4 @@
-MineMotion (name TBD) maps full-body gestures to Minecraft inputs
+Mango maps full-body gestures to Minecraft inputs
 
 ## component details
 
